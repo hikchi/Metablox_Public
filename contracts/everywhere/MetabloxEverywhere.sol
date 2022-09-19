@@ -36,6 +36,8 @@ contract MetabloxEverywhere is
 {
     /* libs */
     using SafeERC20 for ERC20;
+    using SafeMath for uint8;
+    using SafeMath for uint16;
     using SafeMath for uint256;
     using Strings for uint256;
     using CountersUpgradeable for CountersUpgradeable.Counter;
@@ -48,18 +50,18 @@ contract MetabloxEverywhere is
         string country;
         string state;
         string city;
-        uint256 bloxSupply;
-        uint256 bloxSupplyWithLandmark;
+        uint16 bloxSupply;
+        uint16 bloxSupplyWithLandmark;
         string uriSuffix;
-        uint256[] bloxNumbers;
+        uint16[] bloxNumbers;
         // mappings
-        mapping(uint256 => address) owners;
-        mapping(uint256 => bool) cappedBlox;
-        mapping(uint256 => bool) isLandmark;
+        mapping(uint16 => address) owners;
+        mapping(uint16 => bool) cappedBlox;
+        mapping(uint16 => bool) isLandmark;
         // mint limitations
         bool allBloxesSold;
-        uint256 maxPublicMintAmount;
-        uint256 maxCustodialMintAmount;
+        uint8 maxPublicMint;
+        uint8 maxCustodialMint;
         // authorizies
         address minter;
         address capper;
@@ -73,8 +75,8 @@ contract MetabloxEverywhere is
 
         // some members for GP.
         bool enabledGP;
-        uint256 currPhase;
-        uint256 remainingGP;
+        uint8 currPhase;
+        uint8 remainingGP;
         uint256 lastBlockNum;
         // [WIP] Miscs
         bool enabledPublicMint;
@@ -82,7 +84,7 @@ contract MetabloxEverywhere is
 
     struct TokenToBlox {
         uint256 bloxIndex;
-        uint256 bloxNumber;
+        uint16 bloxNumber;
     }
 
     /* Blox registry */
@@ -98,25 +100,15 @@ contract MetabloxEverywhere is
     mapping(string => address) priceFeedRegistry;
 
     string public contractUri;
-
+    string public baseURI;
     /* tolerances */
     uint256 constant BASE_TOLERANCE = 1e4; // tolerance decimals: 4
     uint256 constant TOLERANCE_PADDING = 1e22; // 100 matic
-
     /* public params */
     address public propertyTierContractAddress;
-
-    uint256 public gracePeriodAmount;
-    uint256 public gracePeriodRemaining;
-    uint256 public gracePeriodCurrent;
-    mapping(uint256 => uint256) public gracePeriodBlockNumber;
-
     /* private params */
     /// @custom:oz-upgrades-unsafe-allow constructor
     // constructor() initializer {}
-
-    string public baseURI;
-
     event NewCityRegistered(string _country, string _state, string _city);
 
     event NewBloxMinted(
@@ -182,17 +174,7 @@ contract MetabloxEverywhere is
     ) {
         Blox storage _blox = getBlox(_country, _state, _city);
         address _capper = _blox.capper;
-        require(
-            _capper == _msgSender(),
-            string(
-                abi.encodePacked(
-                    "caller is not the capper: ",
-                    _country,
-                    _state,
-                    _city
-                )
-            )
-        );
+        require(_capper == _msgSender(), "caller is not the capper");
         _;
     }
 
@@ -202,18 +184,8 @@ contract MetabloxEverywhere is
         string memory _city
     ) {
         Blox storage _blox = getBlox(_country, _state, _city);
-        address _minter = _blox.capper;
-        require(
-            _minter == _msgSender(),
-            string(
-                abi.encodePacked(
-                    "caller is not the minter: ",
-                    _country,
-                    _state,
-                    _city
-                )
-            )
-        );
+        address _minter = _blox.minter;
+        require(_minter == _msgSender(), "caller is not the minter: ");
         _;
     }
 
@@ -258,8 +230,8 @@ contract MetabloxEverywhere is
         _blox.paymentTokenBeneficiary = _authorities[2];
         _blox.royaltyBeneficiary = _authorities[3];
         // set defaulte mint amount
-        _blox.maxCustodialMintAmount = 20;
-        _blox.maxPublicMintAmount = 5;
+        _blox.maxCustodialMint = 20;
+        _blox.maxPublicMint = 5;
         // uri suffix
         _blox.uriSuffix = _uriSuffix;
     }
@@ -268,7 +240,7 @@ contract MetabloxEverywhere is
         string memory _country,
         string memory _state,
         string memory _city,
-        uint256[] memory _bloxNumbers,
+        uint16[] memory _bloxNumbers,
         bool _flag
     ) external onlyCapper(_country, _state, _city) {
         Blox storage _blox = getBlox(_country, _state, _city);
@@ -284,7 +256,7 @@ contract MetabloxEverywhere is
         string memory _country,
         string memory _state,
         string memory _city,
-        uint256 _bloxSupply
+        uint16 _bloxSupply
     ) external onlyOwner {
         Blox storage _blox = getBlox(_country, _state, _city);
         _blox.bloxSupply = _bloxSupply;
@@ -294,30 +266,10 @@ contract MetabloxEverywhere is
         string memory _country,
         string memory _state,
         string memory _city,
-        uint256 _bloxSupplyWithLandmark
+        uint16 _bloxSupplyWithLandmark
     ) external onlyOwner {
         Blox storage _blox = getBlox(_country, _state, _city);
         _blox.bloxSupplyWithLandmark = _bloxSupplyWithLandmark;
-    }
-
-    function setMaxPublicMintAmount(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        uint256 _maxPublicMintAmount
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        _blox.maxPublicMintAmount = _maxPublicMintAmount;
-    }
-
-    function setMaxReserveAmount(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        uint256 _maxCustodialMintAmount
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        _blox.maxCustodialMintAmount = _maxCustodialMintAmount;
     }
 
     function initBloxPropertyLevel(
@@ -350,28 +302,12 @@ contract MetabloxEverywhere is
     function custodialMint(
         Blox storage _blox,
         address _user,
-        uint256 _bloxNumber
+        uint16 _bloxNumber
     ) private {
         // check if Blox is all sold
-        require(
-            !_blox.allBloxesSold,
-            getErrorMsg(
-                "Bloxes are all sold",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(!_blox.allBloxesSold, "Bloxes are all sold");
         // check if Blox doesn't exist
-        require(
-            _blox.owners[_bloxNumber] != address(0),
-            getErrorMsg(
-                "Blox already minted",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(_blox.owners[_bloxNumber] != address(0), "Blox already minted");
         // get current token id, and add one
         uint256 _tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
@@ -412,20 +348,20 @@ contract MetabloxEverywhere is
         string memory _state,
         string memory _city,
         address _user,
-        uint256[] memory _bloxNumbers
+        uint16[] memory _bloxNumbers
     ) external onlyMinter(_country, _state, _city) whenNotPaused {
         Blox storage _blox = getBlox(_country, _state, _city);
         // check blox length availability
         require(
-            _bloxNumbers.length <= _blox.maxCustodialMintAmount &&
+            _bloxNumbers.length <= _blox.maxCustodialMint &&
                 _bloxNumbers.length > 0,
-            getErrorMsg("exceed maximum mint amount: ", _country, _state, _city)
+            "exceed maximum mint amount"
         );
         // check if the mint amount exceeds max blox supply
         uint256 _supply = _blox.bloxNumbers.length;
         require(
             _supply + _bloxNumbers.length <= _blox.bloxSupply,
-            getErrorMsg("exceed maximum blox supply", _country, _state, _city)
+            "exceed maximum blox supply"
         );
         // mint execution
         for (uint256 i = 0; i < _bloxNumbers.length; i++) {
@@ -436,62 +372,25 @@ contract MetabloxEverywhere is
     // public mint
     function publicMint(
         Blox storage _blox,
-        uint256 _bloxNumber,
+        uint16 _bloxNumber,
         uint8 _propertyTier,
         address _buyWith,
         uint256 _erc20TokenAmount,
         uint256 _tolerance
     ) private {
         // check if bloxes are all sold out
-        require(
-            !_blox.allBloxesSold,
-            getErrorMsg(
-                "Bloxes are all sold",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(!_blox.allBloxesSold, "Bloxes are all sold");
         // check if Blox doesn't exist
-        require(
-            _blox.owners[_bloxNumber] != address(0),
-            getErrorMsg(
-                "Blox already minted",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(_blox.owners[_bloxNumber] != address(0), "Blox already minted");
         // check if the blox id is available in between of 1 to total supply
         require(
             _bloxNumber <= _blox.bloxSupplyWithLandmark && _bloxNumber >= 1,
-            getErrorMsg(
-                "invalid Blox number",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
+            "invalid Blox number"
         );
         // check if the blox is capped by third party payment
-        require(
-            !_blox.cappedBlox[_bloxNumber],
-            getErrorMsg(
-                "the Blox is capped",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(!_blox.cappedBlox[_bloxNumber], "the Blox is capped");
         // check if it's not a landmark
-        require(
-            !_blox.isLandmark[_bloxNumber],
-            getErrorMsg(
-                "the Blox is a Landmark",
-                _blox.country,
-                _blox.state,
-                _blox.city
-            )
-        );
+        require(!_blox.isLandmark[_bloxNumber], "the Blox is a Landmark");
         // get user
         address _user = _msgSender();
         // assign owner to correspond Blox
@@ -521,8 +420,11 @@ contract MetabloxEverywhere is
             USDT.safeTransferFrom(
                 _user,
                 _blox.paymentTokenBeneficiary,
-                getBasePriceFromPropertyTier(_blox.currPhase, _propertyTier) *
-                    10**USDT.decimals()
+                getPhasePrice(
+                    _blox.currPhase,
+                    _blox.remainingGP,
+                    _propertyTier
+                ) * 10**USDT.decimals()
             );
         } else if (_buyWith == paymentTokenRegistry["WETH"]) {
             ERC20 WETH = ERC20(paymentTokenRegistry["WETH"]);
@@ -532,14 +434,10 @@ contract MetabloxEverywhere is
                     _erc20TokenAmount,
                     _tolerance * 10**(18 - WETH.decimals()),
                     _propertyTier,
-                    _blox.currPhase
+                    _blox.currPhase,
+                    _blox.remainingGP
                 ),
-                getErrorMsg(
-                    "unable to mint with WETH",
-                    _blox.country,
-                    _blox.state,
-                    _blox.city
-                )
+                "unable to mint with WETH"
             );
             WETH.safeTransferFrom(
                 _user,
@@ -553,24 +451,13 @@ contract MetabloxEverywhere is
                     _erc20TokenAmount,
                     _tolerance,
                     _propertyTier,
-                    _blox.currPhase
+                    _blox.currPhase,
+                    _blox.remainingGP
                 ),
-                getErrorMsg(
-                    "unable to mint with MATIC",
-                    _blox.country,
-                    _blox.state,
-                    _blox.city
-                )
+                "unable to mint with MATIC"
             );
         } else {
-            revert(
-                getErrorMsg(
-                    "unsupported token to mint Bloxes",
-                    _blox.country,
-                    _blox.state,
-                    _blox.city
-                )
-            );
+            revert("unsupported token to mint Bloxes");
         }
 
         gracePeriodCheck(_blox, _user);
@@ -589,7 +476,7 @@ contract MetabloxEverywhere is
         string memory _country,
         string memory _state,
         string memory _city,
-        uint256[] memory _bloxNumbers,
+        uint16[] memory _bloxNumbers,
         uint8[] memory _propertyTiers,
         address _buyWith,
         uint256[] memory _erc20TokenAmounts,
@@ -597,31 +484,23 @@ contract MetabloxEverywhere is
     ) external payable nonReentrant whenNotPaused {
         Blox storage _blox = getBlox(_country, _state, _city);
         // check public mint flipper
-        require(
-            _blox.enabledPublicMint,
-            getErrorMsg(
-                "public mint disabled temporarily",
-                _country,
-                _state,
-                _city
-            )
-        );
+        require(_blox.enabledPublicMint, "public mint disabled temporarily");
         // check blox length availability
         require(
             _bloxNumbers.length == _propertyTiers.length &&
                 _propertyTiers.length == _erc20TokenAmounts.length,
-            getErrorMsg("unmatched length of array", _country, _state, _city)
+            "unmatched length of array"
         );
         require(
-            _bloxNumbers.length <= _blox.maxPublicMintAmount &&
+            _bloxNumbers.length <= _blox.maxPublicMint &&
                 _bloxNumbers.length > 0,
-            getErrorMsg("exceed maximum mint amount", _country, _state, _city)
+            "exceed maximum mint amount"
         );
         // check if the mint amount exceeds max blox supply
         uint256 _supply = _blox.bloxNumbers.length;
         require(
             _supply + _bloxNumbers.length <= _blox.bloxSupplyWithLandmark,
-            getErrorMsg("exceed maximum blox supply", _country, _state, _city)
+            "exceed maximum blox supply"
         );
         // matic special examination
         if (_buyWith == paymentTokenRegistry["WMATIC"]) {
@@ -631,12 +510,7 @@ contract MetabloxEverywhere is
             }
             require(
                 msg.value >= _totalMaticAmount,
-                getErrorMsg(
-                    "insufficient matic amount to mint bloxes",
-                    _country,
-                    _state,
-                    _city
-                )
+                "insufficient matic amount to mint bloxes"
             );
         }
 
@@ -669,11 +543,13 @@ contract MetabloxEverywhere is
         uint256 tokenAmount,
         uint256 tolerance,
         uint8 propertyTier,
-        uint256 _currPhase
+        uint8 _currPhase,
+        uint256 _remainingGP
     ) private view returns (bool) {
         // chainlink: 18 + 8 = 0 + 4 + 22
-        uint256 bloxPriceInUsdt = getBasePriceFromPropertyTier(
+        uint256 bloxPriceInUsdt = getPhasePrice(
             _currPhase,
+            _remainingGP,
             propertyTier
         );
         uint256 usdtPrice = getUsdtPrice(priceFeedAddress);
@@ -692,24 +568,17 @@ contract MetabloxEverywhere is
     function gracePeriodCheck(Blox storage _blox, address _user) private {
         // if the reserved supply hit a specific ratio
         // grace period activates
-        if (gracePeriodAmount >= 10) {
+        if (_blox.currPhase >= 10) {
             return;
         }
 
         if (!_blox.enabledGP) {
             return;
         }
-        // WIP
         uint256 _supply = _blox.bloxNumbers.length;
         if (_supply % getBloxSupplyDivBy10(_supply) == 0) {
-            _blox.currPhase = _blox.currPhase.add(1);
-            _blox.remainingGP = _blox.remainingGP.add(1);
-            // gracePeriodAmount = gracePeriodAmount.add(1);
-            // gracePeriodBlockNumber[gracePeriodAmount] = block.number;
-            // if (gracePeriodRemaining == 0) {
-            //     gracePeriodCurrent = gracePeriodCurrent.add(1);
-            // }
-            // gracePeriodRemaining = gracePeriodRemaining.add(1);
+            _blox.currPhase = _blox.currPhase + 1;
+            _blox.remainingGP = _blox.remainingGP + 1;
             emit EnteringGracePeriod(_user, _blox.remainingGP, block.number);
         }
     }
@@ -726,15 +595,16 @@ contract MetabloxEverywhere is
         return uint256(price);
     }
 
-    function getBasePriceFromPropertyTier(
-        uint256 _currPhase,
+    function getPhasePrice(
+        uint8 _currPhase,
+        uint256 _remainingGP,
         uint8 propertyTier
     ) public view returns (uint256) {
         bool _canSub;
         uint256 _phase;
         uint256 _propertyTier;
-        (_canSub, _phase) = _currPhase.trySub(gracePeriodRemaining);
-        (_canSub, _propertyTier) = uint256(propertyTier).trySub(1);
+        (_canSub, _phase) = _currPhase.trySub(_remainingGP);
+        (_canSub, _propertyTier) = propertyTier.trySub(1);
 
         require(
             _canSub,
@@ -818,15 +688,13 @@ contract MetabloxEverywhere is
         returns (string memory)
     {
         super.tokenURI(tokenId);
-        Blox storage _blox = bloxRegistry[
-            tokenToBloxRegistry[tokenId].bloxIndex
-        ];
         return
             bytes(baseURI).length > 0
                 ? string(
                     abi.encodePacked(
                         baseURI,
-                        _blox.uriSuffix,
+                        bloxRegistry[tokenToBloxRegistry[tokenId].bloxIndex]
+                            .uriSuffix,
                         tokenId.toString()
                     )
                 )
@@ -848,20 +716,6 @@ contract MetabloxEverywhere is
 
     function unpause() external onlyOwner {
         _unpause();
-    }
-
-    /* periodcally call it every 24 hours */
-    function releaseGracePeriod() external onlyOwner {
-        uint256 _now = block.number;
-        bool _canSub = false;
-        (_canSub, gracePeriodRemaining) = gracePeriodRemaining.trySub(1);
-        require(_canSub, "gracePeriodRemaining overflow");
-
-        if (gracePeriodBlockNumber[gracePeriodCurrent.add(1)] != 0) {
-            gracePeriodCurrent = gracePeriodCurrent.add(1);
-        }
-
-        emit ReleasingGracePeriod(owner(), gracePeriodCurrent, block.number);
     }
 
     function withdraw() external {
@@ -900,7 +754,7 @@ contract MetabloxEverywhere is
         string memory _country,
         string memory _state,
         string memory _city,
-        uint256[] memory _bloxNumbers,
+        uint16[] memory _bloxNumbers,
         bool _flag
     ) external onlyOwner {
         Blox storage _blox = getBlox(_country, _state, _city);
@@ -945,7 +799,7 @@ contract MetabloxEverywhere is
         view
         returns (
             bool _allBloxesSold,
-            uint256 _maxPublicMintAmount,
+            uint256 _maxPublicMint,
             uint256 _maxCustodialMintAmount
         )
     {
@@ -953,8 +807,8 @@ contract MetabloxEverywhere is
             bloxRegistryIndex[_country][_state][_city]
         ];
         _allBloxesSold = _blox.allBloxesSold;
-        _maxPublicMintAmount = _blox.maxPublicMintAmount;
-        _maxCustodialMintAmount = _blox.maxCustodialMintAmount;
+        _maxPublicMint = _blox.maxPublicMint;
+        _maxCustodialMintAmount = _blox.maxCustodialMint;
     }
 
     // baseURi overrider
@@ -984,15 +838,6 @@ contract MetabloxEverywhere is
     ) external onlyOwner {
         Blox storage _blox = getBlox(_country, _state, _city);
         _blox.capper = _capper;
-    }
-
-    function getErrorMsg(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        string memory _msg
-    ) private pure returns (string memory) {
-        return string(abi.encodePacked(_msg, _country, _state, _city));
     }
 
     function _burn(uint256 tokenId)
