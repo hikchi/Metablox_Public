@@ -8,35 +8,13 @@ interface IMetabloxEverywhere {
         string memory _city
     ) external;
 
-    /* custodial mint */
-    function custodialMint(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        address _user,
-        uint256 _bloxNumber
-    ) external;
-
     /* custodial batch mint */
-
     function custodialBatchMint(
         string memory _country,
         string memory _state,
         string memory _city,
         address _user,
         uint256[] memory _bloxNumbers
-    ) external;
-
-    /* public mint */
-    function publicMint(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        uint256 _bloxNumber,
-        uint8 _propertyTier,
-        address _buyWith,
-        uint256 _erc20TokenAmount,
-        uint256 _tolerance
     ) external;
 
     /* public batch mint */

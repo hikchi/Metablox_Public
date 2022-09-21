@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.2;
 
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721RoyaltyUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -20,15 +19,10 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "../storage/PropertyTier.sol";
 import "../storage/PropertyLevel.sol";
 
-import "./IMetabloxEverywhere.sol";
 import "./MetabloxMemory.sol";
 
-/// @title MetaBlox Everywhere
-/// @author Kevin, Chung
-/// @notice MetaBlox Everywhere
 contract MetabloxEverywhere is
     ERC721RoyaltyUpgradeable,
-    ERC721EnumerableUpgradeable,
     OwnableUpgradeable,
     UUPSUpgradeable,
     ReentrancyGuardUpgradeable,
@@ -46,38 +40,28 @@ contract MetabloxEverywhere is
 
     /* Blox structure */
     struct Blox {
+        bytes identifier;
         /* metadata */
-        string country;
-        string state;
-        string city;
         uint16 bloxSupply;
-        uint16 bloxSupplyWithLandmark;
         string uriSuffix;
         uint16[] bloxNumbers;
-        // mappings
+        // mappings: blox number to whichever
         mapping(uint16 => address) owners;
         mapping(uint16 => bool) cappedBlox;
         mapping(uint16 => bool) isLandmark;
         // mint limitations
-        bool allBloxesSold;
+        bool allBloxSold;
         uint8 maxPublicMint;
         uint8 maxCustodialMint;
         // authorizies
-        address minter;
-        address capper;
-        address paymentTokenBeneficiary;
-        address royaltyBeneficiary;
         // some contracts for all the functinoalities
         address propertyLevelContract;
         address memoryContract;
         // consider using universal one
-        // address propertyTierContract;
-
         // some members for GP.
         bool enabledGP;
         uint8 currPhase;
         uint8 remainingGP;
-        uint256 lastBlockNum;
         // [WIP] Miscs
         bool enabledPublicMint;
     }
@@ -86,38 +70,44 @@ contract MetabloxEverywhere is
         uint256 bloxIndex;
         uint16 bloxNumber;
     }
-
     /* Blox registry */
-    // country -> state -> city -> blox index
-    mapping(string => mapping(string => mapping(string => uint256))) bloxRegistryIndex;
+    // bytes(country_state_city) -> blox index
+    mapping(bytes => uint256) bloxRegistryIndex;
     // token id -> blox index -> blox number
     mapping(uint256 => TokenToBlox) tokenToBloxRegistry;
     // main struct array for Blox
     Blox[] internal bloxRegistry;
-
     /* chainlink registration table */
-    mapping(string => address) paymentTokenRegistry;
-    mapping(string => address) priceFeedRegistry;
-
-    string public contractUri;
+    mapping(address => bool) paymentTokenRegistry;
+    // mapping(string => address) priceFeedRegistry;
+    // erc20 addr -> oracal address
+    mapping(address => address) priceFeedRegistry;
+    // uris
+    string public contractURI;
     string public baseURI;
+    // global ahthorities
+    address public minter;
+    address public capper;
+    address public paymentTokenBeneficiary; // for royalty as well
     /* tolerances */
     uint256 constant BASE_TOLERANCE = 1e4; // tolerance decimals: 4
     uint256 constant TOLERANCE_PADDING = 1e22; // 100 matic
     /* public params */
     address public propertyTierContractAddress;
+
+    string private constant DEFAULT_URI_SUFFIX = "wild/";
+    address private WMATIC_ADDRESS;
     /* private params */
     /// @custom:oz-upgrades-unsafe-allow constructor
     // constructor() initializer {}
+
     event NewCityRegistered(string _country, string _state, string _city);
 
     event NewBloxMinted(
         address indexed _user,
         uint256 indexed tokenId,
         uint256 indexed _bloxNumber,
-        string _country,
-        string _state,
-        string _city
+        bytes _identifier
     );
 
     event EnteringGracePeriod(
@@ -125,6 +115,7 @@ contract MetabloxEverywhere is
         uint256 _gracePeriod,
         uint256 _timestamp
     );
+
     event ReleasingGracePeriod(
         address indexed _addr,
         uint256 _gracePeriod,
@@ -133,143 +124,147 @@ contract MetabloxEverywhere is
 
     function initialize(
         address _propertyTierContractAddress,
-        address[] memory _tokenRelatedAddresses
+        address[] memory _tokenRelatedAddresses,
+        address[] memory _authorities
     ) public initializer {
         __ERC721_init("Metablox", "Blox");
-        __ERC721Enumerable_init();
         __ERC721Royalty_init();
         __Ownable_init();
         __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
         // initialize Metablox Everwhere contract
-        __Blox_init(_propertyTierContractAddress, _tokenRelatedAddresses);
+        __Blox_init(
+            _propertyTierContractAddress,
+            _tokenRelatedAddresses,
+            _authorities
+        );
     }
 
     function __Blox_init(
         address _propertyTierContractAddress,
-        address[] memory _tokenRelatedAddresses
+        address[] memory _tokenRelatedAddresses,
+        address[] memory _authorities
     ) internal {
         propertyTierContractAddress = _propertyTierContractAddress;
 
-        paymentTokenRegistry["USDT"] = address(_tokenRelatedAddresses[0]);
-        paymentTokenRegistry["WETH"] = address(_tokenRelatedAddresses[1]);
-        paymentTokenRegistry["WMATIC"] = address(_tokenRelatedAddresses[2]);
-        priceFeedRegistry["WETH"] = address(_tokenRelatedAddresses[3]);
-        priceFeedRegistry["MATIC"] = address(_tokenRelatedAddresses[4]);
+        address _usdt = _tokenRelatedAddresses[0];
+        address _wmatic = _tokenRelatedAddresses[1];
+        address _weth = _tokenRelatedAddresses[2];
+        // USDT
+        paymentTokenRegistry[_usdt] = true;
+        // WMATIC
+        paymentTokenRegistry[_wmatic] = true;
+        // WETH
+        paymentTokenRegistry[_weth] = true;
+
+        priceFeedRegistry[_wmatic] = address(_tokenRelatedAddresses[3]);
+        priceFeedRegistry[_weth] = address(_tokenRelatedAddresses[4]);
+
+        minter = _authorities[0];
+        capper = _authorities[1];
+        paymentTokenBeneficiary = _authorities[2];
+
+        WMATIC_ADDRESS = _wmatic;
     }
 
-    function getBlox(
-        string memory _country,
-        string memory _state,
-        string memory _city
-    ) private view returns (Blox storage) {
-        uint256 _i = bloxRegistryIndex[_country][_state][_city];
+    modifier onlyMinter() {
+        require(minter == _msgSender(), "caller is not the minter");
+        _;
+    }
+
+    function getBlox(bytes memory _identifier)
+        private
+        view
+        returns (Blox storage)
+    {
+        uint256 _i = bloxRegistryIndex[_identifier];
         return bloxRegistry[_i];
-    }
-
-    modifier onlyCapper(
-        string memory _country,
-        string memory _state,
-        string memory _city
-    ) {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        address _capper = _blox.capper;
-        require(_capper == _msgSender(), "caller is not the capper");
-        _;
-    }
-
-    modifier onlyMinter(
-        string memory _country,
-        string memory _state,
-        string memory _city
-    ) {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        address _minter = _blox.minter;
-        require(_minter == _msgSender(), "caller is not the minter: ");
-        _;
     }
 
     function register(
         string memory _country,
         string memory _state,
         string memory _city,
-        string memory _uriSuffix,
-        address[] memory _authorities
+        string memory _uriSuffix
     ) external onlyOwner {
         // add blox into index mapping
-        bloxRegistryIndex[_country][_state][_city] = bloxRegistry.length;
-        // push into Blox array
+        bytes memory _identifier = getIdentifier(_country, _state, _city);
+        require(bloxRegistryIndex[_identifier] == 0, "Blox registered");
+        bloxRegistryIndex[_identifier] = bloxRegistry.length;
         bloxRegistry.push();
-        uint256 _index = bloxRegistryIndex[_country][_state][_city];
-        initBlox(_index, _country, _state, _city, _uriSuffix, _authorities);
+        // push into Blox array
+        initBlox(bloxRegistryIndex[_identifier], _identifier, _uriSuffix);
         // fire event
         emit NewCityRegistered(_country, _state, _city);
     }
 
-    function initBlox(
-        uint256 _index,
+    function getIdentifier(
         string memory _country,
         string memory _state,
-        string memory _city,
-        string memory _uriSuffix,
-        address[] memory _authorities
+        string memory _city
+    ) public pure returns (bytes memory) {
+        return abi.encodePacked(_country, _state, _city);
+    }
+
+    function getBloxOwnerByTokenId(
+        uint _tokenId
+    ) public view returns (address) {
+        TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
+        return bloxRegistry[_ttb.bloxIndex].owners[_ttb.bloxNumber];
+    }
+
+    function getBloxTotalSupply(
+        bytes memory _identifier
+    ) public view returns (uint) {
+        return getBlox(_identifier).bloxNumbers.length;
+    }
+
+    function initBlox(
+        uint256 _index,
+        bytes memory _identifier,
+        string memory _uriSuffix
     ) private {
         // init a blank Blox
         Blox storage _blox = bloxRegistry[_index];
-        // set primary info
-        _blox.country = _country;
-        _blox.state = _state;
-        _blox.city = _city;
-        // misc
-        _blox.allBloxesSold = true;
-        _blox.propertyLevelContract = address(new PropertyLevel());
-        _blox.memoryContract = address(new MetabloxMemory());
-        // set role
-        _blox.minter = _authorities[0];
-        _blox.capper = _authorities[1];
-        _blox.paymentTokenBeneficiary = _authorities[2];
-        _blox.royaltyBeneficiary = _authorities[3];
+        _blox.identifier = _identifier;
         // set defaulte mint amount
         _blox.maxCustodialMint = 20;
         _blox.maxPublicMint = 5;
         // uri suffix
         _blox.uriSuffix = _uriSuffix;
+
+        _blox.currPhase = 1;
+
+        _blox.enabledPublicMint = true;
     }
 
     function capBlox(
-        string memory _country,
-        string memory _state,
-        string memory _city,
+        bytes memory _identifier,
         uint16[] memory _bloxNumbers,
         bool _flag
-    ) external onlyCapper(_country, _state, _city) {
-        Blox storage _blox = getBlox(_country, _state, _city);
-
+    ) external {
+        require(capper == _msgSender(), "caller isn't capper");
+        Blox storage _blox = getBlox(_identifier);
         for (uint256 i = 0; i < _bloxNumbers.length; i++) {
-            // to-do: exist function for structure
-            // require(!_exists(_bloxNumber), "the blox has been minted");
             _blox.cappedBlox[_bloxNumbers[i]] = _flag;
         }
     }
 
-    function setBloxSupply(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        uint16 _bloxSupply
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
+    function setBloxSupply(bytes memory _identifier, uint16 _bloxSupply)
+        external
+        onlyOwner
+    {
+        Blox storage _blox = getBlox(_identifier);
         _blox.bloxSupply = _bloxSupply;
     }
 
-    function setBloxSupplyWithLandmark(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        uint16 _bloxSupplyWithLandmark
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        _blox.bloxSupplyWithLandmark = _bloxSupplyWithLandmark;
+    function getBloxSupply(bytes memory _identifier)
+        external
+        view
+        returns (uint16)
+    {
+        Blox storage _blox = getBlox(_identifier);
+        return _blox.bloxSupply;
     }
 
     function initBloxPropertyLevel(
@@ -298,59 +293,93 @@ contract MetabloxEverywhere is
         );
     }
 
-    // custodial mint
-    function custodialMint(
-        Blox storage _blox,
-        address _user,
-        uint16 _bloxNumber
-    ) private {
-        // check if Blox is all sold
-        require(!_blox.allBloxesSold, "Bloxes are all sold");
-        // check if Blox doesn't exist
-        require(_blox.owners[_bloxNumber] != address(0), "Blox already minted");
-        // get current token id, and add one
-        uint256 _tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        // assign owner to correspond Blox
-        _blox.owners[_bloxNumber] = _user;
-        _blox.bloxNumbers.push(_bloxNumber);
-        // associate token id with blox index and number
-        tokenToBloxRegistry[_tokenId] = TokenToBlox({
-            bloxIndex: bloxRegistryIndex[_blox.country][_blox.state][
-                _blox.city
-            ],
-            bloxNumber: _bloxNumber
-        });
-        // mint token
-        _safeMint(_user, _tokenId);
-        // check if it's all sold
-        if (_blox.bloxNumbers.length == _blox.bloxSupplyWithLandmark) {
-            _blox.allBloxesSold = true;
-        }
-        // property level initialization
-        initBloxPropertyLevel(_blox.propertyLevelContract, _bloxNumber);
-        // check if the blox are all sold out
-        gracePeriodCheck(_blox, _user);
-        // fire event
-        emit NewBloxMinted(
-            _user,
-            _tokenId,
-            block.number,
-            _blox.country,
-            _blox.state,
-            _blox.city
-        );
+    function authorizedWildMint(address _user, uint256 _mintAmount)
+        external
+        onlyMinter
+        whenNotPaused
+    {
+        wildMint(_user, _mintAmount);
     }
 
-    // reservation batch mint
+    function authorizedAssociation(
+        bytes memory _identifier,
+        uint256[] memory _wildTokenIds,
+        uint16[] memory _bloxNumbers
+    ) external onlyMinter whenNotPaused {
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
+    }
+
+    function wildMint(address _user, uint256 _mintAmount)
+        private
+        returns (uint256[] memory)
+    {
+        require(_mintAmount > 0 && _mintAmount <= 20, "exceed wild mint range");
+        uint256[] memory _tokenIds = new uint256[](_mintAmount);
+        for (uint256 i = 0; i < _mintAmount; i++) {
+            uint256 _tokenId = _tokenIdCounter.current();
+            _safeMint(_user, _tokenId);
+            _tokenIdCounter.increment();
+            _tokenIds[i] = _tokenId;
+        }
+
+        return _tokenIds;
+    }
+
+    function associateTokenToBlox(
+        bytes memory _identifier,
+        uint256[] memory _wildTokenIds,
+        uint16[] memory _bloxNumbers
+    ) private {
+        require(
+            _wildTokenIds.length > 0 && _wildTokenIds.length <= 20,
+            "exceed association range"
+        );
+        require(
+            _wildTokenIds.length == _bloxNumbers.length,
+            "unmatched length"
+        );
+
+        Blox storage _blox = getBlox(_identifier);
+        require(
+            _bloxNumbers.length + _blox.bloxNumbers.length <= _blox.bloxSupply,
+            "exceed blox supply"
+        );
+
+        for (uint256 i = 0; i < _wildTokenIds.length; i++) {
+            uint16 _bloxNumber = _bloxNumbers[i];
+            require(
+                _bloxNumber >= 1 && _bloxNumber <= _blox.bloxSupply,
+                "invalid blox number"
+            );
+            require(!_blox.cappedBlox[_bloxNumber], "blox is capped");
+            require(!_blox.isLandmark[_bloxNumber], "blox is a landmark");
+            uint256 _tokenId = _wildTokenIds[i];
+            address _user = ownerOf(_tokenId);
+
+            tokenToBloxRegistry[_tokenId] = TokenToBlox({
+                bloxIndex: bloxRegistryIndex[_identifier],
+                bloxNumber: _bloxNumber
+            });
+
+            _blox.owners[_bloxNumber] = _user;
+            _blox.bloxNumbers.push(_bloxNumber);
+
+            if (_blox.bloxNumbers.length == _blox.bloxSupply) {
+                _blox.allBloxSold = true;
+            }
+            initBloxPropertyLevel(_blox.propertyLevelContract, _bloxNumber);
+
+            gracePeriodCheck(_blox, _user);
+        }
+    }
+
+    // custodial batch mint
     function custodialBatchMint(
-        string memory _country,
-        string memory _state,
-        string memory _city,
+        bytes memory _identifier,
         address _user,
         uint16[] memory _bloxNumbers
-    ) external onlyMinter(_country, _state, _city) whenNotPaused {
-        Blox storage _blox = getBlox(_country, _state, _city);
+    ) external onlyMinter whenNotPaused {
+        Blox storage _blox = getBlox(_identifier);
         // check blox length availability
         require(
             _bloxNumbers.length <= _blox.maxCustodialMint &&
@@ -364,167 +393,78 @@ contract MetabloxEverywhere is
             "exceed maximum blox supply"
         );
         // mint execution
-        for (uint256 i = 0; i < _bloxNumbers.length; i++) {
-            custodialMint(_blox, _user, _bloxNumbers[i]);
-        }
-    }
-
-    // public mint
-    function publicMint(
-        Blox storage _blox,
-        uint16 _bloxNumber,
-        uint8 _propertyTier,
-        address _buyWith,
-        uint256 _erc20TokenAmount,
-        uint256 _tolerance
-    ) private {
-        // check if bloxes are all sold out
-        require(!_blox.allBloxesSold, "Bloxes are all sold");
-        // check if Blox doesn't exist
-        require(_blox.owners[_bloxNumber] != address(0), "Blox already minted");
-        // check if the blox id is available in between of 1 to total supply
-        require(
-            _bloxNumber <= _blox.bloxSupplyWithLandmark && _bloxNumber >= 1,
-            "invalid Blox number"
-        );
-        // check if the blox is capped by third party payment
-        require(!_blox.cappedBlox[_bloxNumber], "the Blox is capped");
-        // check if it's not a landmark
-        require(!_blox.isLandmark[_bloxNumber], "the Blox is a Landmark");
-        // get user
-        address _user = _msgSender();
-        // assign owner to correspond Blox
-        _blox.owners[_bloxNumber] = _user;
-        _blox.bloxNumbers.push(_bloxNumber);
-        // get current token id, and add one
-        uint256 _tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        // associate token id with blox number
-        tokenToBloxRegistry[_tokenId] = TokenToBlox({
-            bloxIndex: bloxRegistryIndex[_blox.country][_blox.state][
-                _blox.city
-            ],
-            bloxNumber: _bloxNumber
-        });
-        // mint token
-        _safeMint(_user, _tokenId);
-        // mint and set blox properties
-        initBloxPropertyLevel(_blox.propertyLevelContract, _bloxNumber);
-        // check if the blox are all sold out
-        if (_blox.bloxNumbers.length == _blox.bloxSupplyWithLandmark) {
-            _blox.allBloxesSold = true;
-        }
-
-        if (_buyWith == paymentTokenRegistry["USDT"]) {
-            ERC20 USDT = ERC20(paymentTokenRegistry["USDT"]);
-            USDT.safeTransferFrom(
-                _user,
-                _blox.paymentTokenBeneficiary,
-                getPhasePrice(
-                    _blox.currPhase,
-                    _blox.remainingGP,
-                    _propertyTier
-                ) * 10**USDT.decimals()
-            );
-        } else if (_buyWith == paymentTokenRegistry["WETH"]) {
-            ERC20 WETH = ERC20(paymentTokenRegistry["WETH"]);
-            require(
-                isAbleToMintWith(
-                    priceFeedRegistry["WETH"],
-                    _erc20TokenAmount,
-                    _tolerance * 10**(18 - WETH.decimals()),
-                    _propertyTier,
-                    _blox.currPhase,
-                    _blox.remainingGP
-                ),
-                "unable to mint with WETH"
-            );
-            WETH.safeTransferFrom(
-                _user,
-                _blox.paymentTokenBeneficiary,
-                _erc20TokenAmount
-            );
-        } else if (_buyWith == paymentTokenRegistry["WMATIC"]) {
-            require(
-                isAbleToMintWith(
-                    priceFeedRegistry["MATIC"],
-                    _erc20TokenAmount,
-                    _tolerance,
-                    _propertyTier,
-                    _blox.currPhase,
-                    _blox.remainingGP
-                ),
-                "unable to mint with MATIC"
-            );
-        } else {
-            revert("unsupported token to mint Bloxes");
-        }
-
-        gracePeriodCheck(_blox, _user);
-        emit NewBloxMinted(
-            _user,
-            _tokenId,
-            block.number,
-            _blox.country,
-            _blox.state,
-            _blox.city
-        );
+        uint256[] memory _wildTokenIds = wildMint(_user, _bloxNumbers.length);
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
     }
 
     // reservation batch mint
     function publicBatchMint(
-        string memory _country,
-        string memory _state,
-        string memory _city,
+        bytes memory _identifier,
         uint16[] memory _bloxNumbers,
         uint8[] memory _propertyTiers,
-        address _buyWith,
+        address _paymentToken,
         uint256[] memory _erc20TokenAmounts,
         uint256 _tolerance
-    ) external payable nonReentrant whenNotPaused {
-        Blox storage _blox = getBlox(_country, _state, _city);
+    ) public payable nonReentrant whenNotPaused {
+        Blox storage _blox = getBlox(_identifier);
         // check public mint flipper
         require(_blox.enabledPublicMint, "public mint disabled temporarily");
+        // check blox length availability
+        require(
+            _bloxNumbers.length <= _blox.maxPublicMint &&
+                _bloxNumbers.length > 0,
+            "exceed maximum mint amount"
+        );
         // check blox length availability
         require(
             _bloxNumbers.length == _propertyTiers.length &&
                 _propertyTiers.length == _erc20TokenAmounts.length,
             "unmatched length of array"
         );
-        require(
-            _bloxNumbers.length <= _blox.maxPublicMint &&
-                _bloxNumbers.length > 0,
-            "exceed maximum mint amount"
-        );
         // check if the mint amount exceeds max blox supply
         uint256 _supply = _blox.bloxNumbers.length;
         require(
-            _supply + _bloxNumbers.length <= _blox.bloxSupplyWithLandmark,
+            _supply + _bloxNumbers.length <= _blox.bloxSupply,
             "exceed maximum blox supply"
         );
-        // matic special examination
-        if (_buyWith == paymentTokenRegistry["WMATIC"]) {
-            uint256 _totalMaticAmount = 0;
-            for (uint256 i = 0; i < _erc20TokenAmounts.length; i++) {
-                _totalMaticAmount += _erc20TokenAmounts[i];
-            }
-            require(
-                msg.value >= _totalMaticAmount,
-                "insufficient matic amount to mint bloxes"
-            );
-        }
-
-        // public mint execution
+        // should be in payment token registry
+        require(paymentTokenRegistry[_paymentToken], "invalid payment token");
+        // check ayment availability
+        uint256 _totalPaymentAmount = 0;
         for (uint256 i = 0; i < _bloxNumbers.length; i++) {
-            publicMint(
-                _blox,
-                _bloxNumbers[i],
-                _propertyTiers[i],
-                _buyWith,
-                _erc20TokenAmounts[i],
-                _tolerance
+            require(
+                isAbleToMintWith(
+                    priceFeedRegistry[_paymentToken],
+                    _erc20TokenAmounts[i],
+                    _tolerance,
+                    _propertyTiers[i],
+                    _blox.currPhase,
+                    _blox.remainingGP
+                ),
+                string(abi.encodePacked("unable to mint with", _paymentToken))
+            );
+            _totalPaymentAmount += _erc20TokenAmounts[i];
+        }
+        // matic special examination
+        if (_paymentToken == WMATIC_ADDRESS) {
+            require(
+                msg.value >= _totalPaymentAmount,
+                "insufficient matic amount to mint"
+            );
+        } else {
+            ERC20 _erc20 = ERC20(_paymentToken);
+            _erc20.safeTransferFrom(
+                _msgSender(),
+                paymentTokenBeneficiary,
+                _totalPaymentAmount
             );
         }
+        // payment succeeded, execute mint
+        uint256[] memory _wildTokenIds = wildMint(
+            _msgSender(),
+            _bloxNumbers.length
+        );
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
     }
 
     /**
@@ -552,15 +492,15 @@ contract MetabloxEverywhere is
             _remainingGP,
             propertyTier
         );
-        uint256 usdtPrice = getUsdtPrice(priceFeedAddress);
+        uint256 usdPrice = getUsdPrice(priceFeedAddress);
         if (
-            (tokenAmount * usdtPrice) >
+            (tokenAmount * usdPrice) >
             bloxPriceInUsdt * (BASE_TOLERANCE + tolerance) * TOLERANCE_PADDING
         ) revert("exceed tolerance range");
         if (
-            (tokenAmount * usdtPrice) <
+            (tokenAmount * usdPrice) <
             bloxPriceInUsdt * (BASE_TOLERANCE - tolerance) * TOLERANCE_PADDING
-        ) revert("under tolerance range");
+        ) revert("below tolerance range");
 
         return true;
     }
@@ -576,22 +516,26 @@ contract MetabloxEverywhere is
             return;
         }
         uint256 _supply = _blox.bloxNumbers.length;
-        if (_supply % getBloxSupplyDivBy10(_supply) == 0) {
+        if (_supply % getBloxSupplyDivBy10(_blox.bloxSupply) == 0) {
             _blox.currPhase = _blox.currPhase + 1;
             _blox.remainingGP = _blox.remainingGP + 1;
             emit EnteringGracePeriod(_user, _blox.remainingGP, block.number);
         }
     }
 
-    function getUsdtPrice(address poolAddress) internal view returns (uint256) {
+    function releaseGracePeriod(bytes memory _identifier) external onlyOwner {
+        Blox storage _blox = getBlox(_identifier);
+
+        (bool _canSub,) = _blox.remainingGP.trySub(1);
+        require(_canSub, "GP remaining overflow");
+
+        _blox.remainingGP = _blox.remainingGP - 1;
+        emit ReleasingGracePeriod(owner(), _blox.remainingGP, block.number);
+    }
+
+    function getUsdPrice(address poolAddress) internal view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(poolAddress);
-        (
-            uint80 roundID,
-            int256 price,
-            uint256 startedAt,
-            uint256 timeStamp,
-            uint80 answeredInRound
-        ) = priceFeed.latestRoundData();
+        (, int256 price, , , ) = priceFeed.latestRoundData();
         return uint256(price);
     }
 
@@ -605,7 +549,6 @@ contract MetabloxEverywhere is
         uint256 _propertyTier;
         (_canSub, _phase) = _currPhase.trySub(_remainingGP);
         (_canSub, _propertyTier) = propertyTier.trySub(1);
-
         require(
             _canSub,
             "phase or property tier overflow when getting base price"
@@ -628,26 +571,11 @@ contract MetabloxEverywhere is
         return _divided;
     }
 
-    function addNewPriceFeed(string memory tokenName, address priceFeedAddress)
+    function addNewPriceFeed(address _erc20Addr, address _priceFeedAddr)
         external
         onlyOwner
     {
-        require(
-            priceFeedRegistry[tokenName] == address(0),
-            "existing price feed"
-        );
-        priceFeedRegistry[tokenName] = priceFeedAddress;
-    }
-
-    function updatePriceFeed(string memory tokenName, address priceFeedAddress)
-        external
-        onlyOwner
-    {
-        require(
-            priceFeedRegistry[tokenName] != address(0),
-            "non-existing price feed"
-        );
-        priceFeedRegistry[tokenName] = priceFeedAddress;
+        priceFeedRegistry[_erc20Addr] = _priceFeedAddr;
     }
 
     function isApprovedForAll(address _owner, address _operator)
@@ -657,9 +585,8 @@ contract MetabloxEverywhere is
         returns (bool isOperator)
     {
         // if OpenSea's ERC721 Proxy Address is detected, auto-return true
-        if (_operator == address(0x58807baD0B376efc12F5AD86aAc70E78ed67deaE)) {
+        if (_operator == address(0x58807baD0B376efc12F5AD86aAc70E78ed67deaE))
             return true;
-        }
 
         // otherwise, use the default ERC721.isApprovedForAll()
         return super.isApprovedForAll(_owner, _operator);
@@ -672,39 +599,46 @@ contract MetabloxEverywhere is
     {}
 
     // The following functions are overrides required by Solidity.
-
     function _beforeTokenTransfer(
         address from,
         address to,
         uint256 tokenId
-    ) internal override(ERC721Upgradeable, ERC721EnumerableUpgradeable) {
+    ) internal override(ERC721Upgradeable) {
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
-    function tokenURI(uint256 tokenId)
+    function tokenURI(uint256 _tokenId)
         public
         view
         override(ERC721Upgradeable)
         returns (string memory)
     {
-        super.tokenURI(tokenId);
+        super.tokenURI(_tokenId);
+        TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
         return
-            bytes(baseURI).length > 0
+            bytes(baseURI).length > 0 &&
+                _ttb.bloxNumber != 0
                 ? string(
                     abi.encodePacked(
                         baseURI,
-                        bloxRegistry[tokenToBloxRegistry[tokenId].bloxIndex]
+                        bloxRegistry[_ttb.bloxIndex]
                             .uriSuffix,
-                        tokenId.toString()
+                        uint(_ttb.bloxNumber).toString()
                     )
                 )
-                : "";
+                : string(
+                    abi.encodePacked(
+                        baseURI,
+                        DEFAULT_URI_SUFFIX,
+                     _tokenId.toString()
+                    )
+                );
     }
 
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(ERC721EnumerableUpgradeable, ERC721RoyaltyUpgradeable)
+        override(ERC721RoyaltyUpgradeable)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
@@ -718,8 +652,8 @@ contract MetabloxEverywhere is
         _unpause();
     }
 
-    function withdraw() external {
-        payable(owner()).transfer(address(this).balance);
+    function withdraw() external onlyOwner {
+        payable(paymentTokenBeneficiary).transfer(address(this).balance);
     }
 
     // royalties for Bloxes
@@ -742,73 +676,48 @@ contract MetabloxEverywhere is
         _setTokenRoyalty(tokenId, receiver, feeNumerator);
     }
 
-    function setContractURI(string memory _contractUri) external onlyOwner {
-        contractUri = _contractUri;
-    }
-
-    function contractURI() public view returns (string memory) {
-        return contractUri;
+    function setContractURI(string memory _contractURI) external onlyOwner {
+        contractURI = _contractURI;
     }
 
     function setLandmarkNumber(
-        string memory _country,
-        string memory _state,
-        string memory _city,
+        bytes memory _identifier,
         uint16[] memory _bloxNumbers,
         bool _flag
     ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
+        Blox storage _blox = getBlox(_identifier);
         for (uint256 i = 0; i < _bloxNumbers.length; i++) {
-            require(
-                _bloxNumbers[i] <= _blox.bloxSupplyWithLandmark,
-                "exceeding landmark index"
-            );
+            require(_bloxNumbers[i] <= _blox.bloxSupply, "exceeding index");
             _blox.isLandmark[_bloxNumbers[i]] = _flag;
         }
     }
 
-    function getAuthorities(
-        string memory _country,
-        string memory _state,
-        string memory _city
-    )
+    function getMintLimitation(bytes memory _identifier)
         public
         view
         returns (
-            address _minter,
-            address _capper,
-            address _paymentTokenBeneficiary,
-            address _royaltyBeneficiary
+            bool _allBloxSold,
+            uint256 _maxPublicMint,
+            uint256 _maxCustodialMint
         )
     {
-        Blox storage _blox = bloxRegistry[
-            bloxRegistryIndex[_country][_state][_city]
-        ];
-        _minter = _blox.minter;
-        _capper = _blox.capper;
-        _paymentTokenBeneficiary = _blox.paymentTokenBeneficiary;
-        _royaltyBeneficiary = _blox.royaltyBeneficiary;
+        Blox storage _blox = bloxRegistry[bloxRegistryIndex[_identifier]];
+        _allBloxSold = _blox.allBloxSold;
+        _maxPublicMint = _blox.maxPublicMint;
+        _maxCustodialMint = _blox.maxCustodialMint;
     }
 
-    function getMintLimitation(
-        string memory _country,
-        string memory _state,
-        string memory _city
-    )
+    function getGracePeriod(bytes memory _identifier)
         public
         view
         returns (
-            bool _allBloxesSold,
-            uint256 _maxPublicMint,
-            uint256 _maxCustodialMintAmount
+            uint256 _currPhase,
+            uint256 _remainingGP
         )
     {
-        Blox storage _blox = bloxRegistry[
-            bloxRegistryIndex[_country][_state][_city]
-        ];
-        _allBloxesSold = _blox.allBloxesSold;
-        _maxPublicMint = _blox.maxPublicMint;
-        _maxCustodialMintAmount = _blox.maxCustodialMint;
+        Blox storage _blox = bloxRegistry[bloxRegistryIndex[_identifier]];
+        _currPhase = _blox.currPhase;
+        _remainingGP = _blox.remainingGP;
     }
 
     // baseURi overrider
@@ -820,30 +729,73 @@ contract MetabloxEverywhere is
         baseURI = _newBaseURI;
     }
 
-    function setMinter(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        address _minter
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        _blox.minter = _minter;
+    function setPropertyLevelContract(bytes memory _identifier, address _new)
+        external
+        onlyOwner
+    {
+        Blox storage _blox = getBlox(_identifier);
+        _blox.propertyLevelContract = _new;
     }
 
-    function setCapper(
-        string memory _country,
-        string memory _state,
-        string memory _city,
-        address _capper
-    ) external onlyOwner {
-        Blox storage _blox = getBlox(_country, _state, _city);
-        _blox.capper = _capper;
+    function setMemoryContract(bytes memory _identifier, address _new)
+        external
+        onlyOwner
+    {
+        Blox storage _blox = getBlox(_identifier);
+        _blox.memoryContract = _new;
+    }
+
+    function flipGracePeriod(bytes memory _identifier, bool _enabledGP)
+        external
+        onlyOwner
+    {
+        Blox storage _blox = getBlox(_identifier);
+        _blox.enabledGP = _enabledGP;
     }
 
     function _burn(uint256 tokenId)
         internal
-        override(ERC721Upgradeable, ERC721RoyaltyUpgradeable)
+        override(ERC721RoyaltyUpgradeable)
     {
         super._burn(tokenId);
+    }
+
+    function totalSupply() public view returns (uint256) {
+        return _tokenIdCounter.current();
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public virtual override {
+        super.transferFrom(from, to, tokenId);
+
+        TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
+        Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+
+        _blox.owners[_ttb.bloxNumber] = to;
+    }
+
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public virtual override {
+        safeTransferFrom(from, to, tokenId, "");
+    }
+
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory data
+    ) public virtual override {
+        super.safeTransferFrom(from, to, tokenId, data);
+
+        TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
+        Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+
+        _blox.owners[_ttb.bloxNumber] = to;
     }
 }

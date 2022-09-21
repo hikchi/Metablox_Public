@@ -4,13 +4,12 @@ const TestToken = artifacts.require("TestToken");
 const PropertyTier = artifacts.require("PropertyTier");
 const PropertyLevel = artifacts.require("PropertyLevel");
 
-// const TestChainlinkMatic = artifacts.require("TestMaticUsdtChainlink");
-// const TestChainlinkWeth = artifacts.require("TestWethUsdtChainlink");
+const TestChainlinkMatic = artifacts.require("TestMaticUsdtChainlink");
+const TestChainlinkWeth = artifacts.require("TestWethUsdtChainlink");
 
 const truffleAssert = require('truffle-assertions');
 
 const BN = require('bn.js');
-
 
 const { deployProxy } = require('@openzeppelin/truffle-upgrades');
 
@@ -21,21 +20,20 @@ const { deployProxy } = require('@openzeppelin/truffle-upgrades');
  */
 contract.only("Metablox Everywhere Test", function (accounts) {
 	before(async function () {
-		// MB instances
-
 		// roles
-		this.nftOwner = accounts[0];
-		this.nftMinter = accounts[1];
-		this.nftCapper = accounts[2];
-		this.nftPaymentTokenBeneficiary = accounts[3];
-		this.nftRoyaltyTokenBeneficiary = accounts[4];
+		this.owner = accounts[0];
+		this.minter = accounts[1];
+		this.capper = accounts[2];
+		this.paymentTokenBeneficiary = accounts[3];
+		this.dummyReceiver = accounts[9];
 		// country -> state -> city identifier
 		this.country = "US";
 		this.state = "WA";
 		this.city = "Seattle";
 		this.uriSuffix = "seattle/";
 		// misc
-		this.baseUri = "https://dev.metablox.co/api/v1/tokenuri/";
+		this.baseURI = "https://dev.metablox.co/api/v1/tokenuri/";
+		this.contractURI = "https://dev.metablox.co/api/v1/royalty/opensea/metadata/";
 		this.bloxNumber = 1;
 		this.propertyTier = 1;
 
@@ -46,10 +44,8 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		this.WMATIC = await TestToken.new(ERC_INIT_SUPPLY);
 
 		// deploy chainlink to be tested
-		// this.chainlinkWeth = await TestChainlinkWeth.new();
-		// this.chainlinkMatic = await TestChainlinkMatic.new();
-		this.chainlinkWeth = this.USDT
-		this.chainlinkMatic = this.USDT
+		this.chainlinkWeth = await TestChainlinkWeth.new();
+		this.chainlinkMatic = await TestChainlinkMatic.new();
 		// Deploy a new property tier contract
 		this.propertyTierContract = await PropertyTier.new();
 		// Deploy a new property level contraxt
@@ -67,44 +63,47 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		// Deploy controller 
 		// this.metabloxControllerContract = await MetabloxController.new(this.Metablox.address, this.metabloxMemories.address, this.propertyLevelContract.address)
 		// initialize metablox contract
+		// MB instances
 		this.Metablox = await Metablox.new();
 		await this.Metablox.initialize(
 			this.propertyTierContract.address,
-			[this.USDT.address, this.WETH.address, this.WMATIC.address, this.chainlinkWeth.address, this.chainlinkMatic.address],
+			[this.USDT.address, this.WMATIC.address, this.WETH.address, this.chainlinkMatic.address, this.chainlinkWeth.address],
+			[this.minter, this.capper, this.paymentTokenBeneficiary],
 		);
 		// this.Metablox = await deployProxy(Metablox, [
 		// 	this.propertyTierContract.address,
 		// 	[this.USDT.address, this.WETH.address, this.WMATIC.address, this.chainlinkWeth.address, this.chainlinkMatic.address],
+		// 	[this.minter, this.capper, this.paymentTokenBeneficiary],
 		// ]);
 		// set base uri
-		await this.Metablox.setBaseURI(this.baseUri);
+		await this.Metablox.setBaseURI(this.baseURI);
+		await this.Metablox.setContractURI(this.contractURI);
 		// create Blox
 		await this.Metablox.register(
 			this.country,
 			this.state,
 			this.city,
 			this.uriSuffix,
-			[this.nftMinter, this.nftCapper, this.nftPaymentTokenBeneficiary, this.nftRoyaltyTokenBeneficiary],
+			{ from: this.owner }
 		)
 
-		const TEST_BLOX_SUPPLY = 20
+		this.identifier = await this.Metablox.getIdentifier(this.country, this.state, this.city);
+
+		this.TEST_BLOX_SUPPLY = 30 // 20 + 10 Landmark
 		await this.Metablox.setBloxSupply(
-			this.country,
-			this.state,
-			this.city,
-			TEST_BLOX_SUPPLY
+			this.identifier,
+			this.TEST_BLOX_SUPPLY,
 		);
-		await this.Metablox.setBloxSupplyWithLandmark(
-			this.country,
-			this.state,
-			this.city,
-			TEST_BLOX_SUPPLY + 10,
-		);
+
 		await this.Metablox.setLandmarkNumber(
-			this.country,
-			this.state,
-			this.city,
-			Array.from({ length: 10 }, (_, i) => TEST_BLOX_SUPPLY + 1 + i), true
+			this.identifier,
+			Array.from({ length: 10 }, (_, i) => this.TEST_BLOX_SUPPLY - 1 - i), true
+		);
+
+		await this.Metablox.setPropertyLevelContract(
+			this.identifier,
+			this.propertyLevelContract.address,
+			{ from: this.owner }
 		);
 
 		// Set up for property level
@@ -114,9 +113,12 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		// pending controllers
 		// await this.propertyLevelContract.grantRole(ATTACH_ROLE, this.metabloxControllerContract.address);
 		// assert.equal(await this.propertyLevelContract.hasRole(ATTACH_ROLE, this.metabloxControllerContract.address), true, "metablox controller is not ERC3664 attacher");
+
+		// start grace period
+		await this.Metablox.flipGracePeriod(this.identifier, true);
 	});
 
-	context.only("Contract Initialization", async function () {
+	context("initialization", async function () {
 		context("with everywhere contract", async function () {
 			it("should have correct data", async function () {
 				assert.equal((await this.Metablox.name()).toString(), "Metablox", "unmatched name");
@@ -125,130 +127,123 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 			});
 
 			it("should be approved by Opensea by default", async function () {
-				assert.equal(await this.Metablox.isApprovedForAll(this.nftOwner, "0x58807baD0B376efc12F5AD86aAc70E78ed67deaE"), true, "unmatched Opensea approval status");
+				assert.equal(await this.Metablox.isApprovedForAll(this.owner, "0x58807baD0B376efc12F5AD86aAc70E78ed67deaE"), true, "unmatched Opensea approval status");
 			})
 		})
 
 		context("with Blox", async function () {
 			it("should have correct authorities", async function () {
-				const authorities = await this.Metablox.getAuthorities(this.country, this.state, this.city);
-				console.log({ authorities });
-				// assert.equal((await this.Metablox.beneficiary()), this.testTokenBenificiary, "unmatched beneficiary");
+				assert.equal(await this.Metablox.minter(), this.minter, "unmatched minter");
+				assert.equal(await this.Metablox.capper(), this.capper, "unmatched capper");
+				assert.equal(await this.Metablox.paymentTokenBeneficiary(), this.paymentTokenBeneficiary, "unmatched payment token beneficiary");
 			});
 
-			it("should have correct authorities", async function () {
-				const mintLimitation = await this.Metablox.getMintLimitation(this.country, this.state, this.city);
-				console.log({ mintLimitation });
-				// assert.equal((await this.Metablox.allBloxesSold()), false, "unmatched allBloxesSold");
-				// assert.equal((await this.Metablox.maxPublicMintAmount()), 5, "unmatched maximum public mint amount");
-				// assert.equal((await this.Metablox.maxReserveMintAmount()), 20, "unmatched maximum reserve mint amount");
+			it("should have correct limitations", async function () {
+				const mintLimitation = await this.Metablox.getMintLimitation(this.identifier);
+				assert.equal(mintLimitation._allBloxSold, false, "unmatched allBloxSold");
+				assert.equal(mintLimitation._maxCustodialMint, 20, "unmatched maximum reserve mint amount");
+				assert.equal(mintLimitation._maxPublicMint, 5, "unmatched maximum public mint amount");
+			});
+
+			it("should have correct uris", async function () {
+				assert.equal(await this.Metablox.baseURI(), this.baseURI, "unmatched base uri");
+				assert.equal(await this.Metablox.contractURI(), this.contractURI, "unmatched contract uri");
 			});
 
 		})
+
 	})
 
-	context("Sad Path", async function () {
+	context("(misc) sad path", async function () {
 		context("Of Reserved Blox", async function () {
 			before(async function () {
 				await truffleAssert.reverts(
-					this.Metablox.setCappedBloxes(Array.from({ length: 10 }, (_, i) => i + 1), true, { from: accounts[9] }),
-					"caller is not the capper",
-					"should fail to set reserved blox with non-capper address",
-				)
-				await this.Metablox.setCappedBloxes(Array.from({ length: 10 }, (_, i) => i + 1), true, { from: accounts[3] });
-			})
-
-			it("should successfully flip reserved blox", async function () {
-				for (i = 1; i <= 10; i++) {
-					assert.equal(await this.Metablox.cappedBlox(i), true, `unmatched whitelist of index ${i}`);
-				}
-			})
-
-			it("should not be able to publicly mint reserved blox", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[this.bloxNumber], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						["100000000000000000000"], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
+					this.Metablox.capBlox(
+						this.identifier,
+						Array.from({ length: 10 }, (_, i) => i + 1),
+						true,
+						{ from: this.owner }
 					),
-					"the Blox is capped",
+					"caller isn't capper",
+					"should fail to cap blox with non-capper address",
+				)
+				await truffleAssert.passes(
+					this.Metablox.capBlox(
+						this.identifier,
+						Array.from({ length: 10 }, (_, i) => i + 1),
+						true,
+						{ from: this.capper }
+					),
+					"should be able to cap blox",
+				);
+			})
+
+			it("should not be able to do custodial mint with capped blox", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.custodialBatchMint(
+						this.identifier,
+						this.dummyReceiver,
+						[1], // capped Blox number
+						{ from: this.minter },
+					),
+					"blox is capped",
 					"should not be able to publicly mint reserved blox",
 				)
 			})
 
 			after(async function () {
-				await this.Metablox.setCappedBloxes(Array.from({ length: 10 }, (_, i) => i + 1), false, { from: accounts[3] })
-			})
-		})
-
-		context("Of Capped Blox", async function () {
-			before(async function () {
-				await truffleAssert.reverts(
-					this.Metablox.capBloxBeforePayment(1, { from: accounts[9] }),
-					"caller is not the capper",
-					"should fail to set capped blox with non-capper address",
-				)
-				for (i = 1; i <= 10; i++) {
-					await this.Metablox.capBloxBeforePayment(i, { from: accounts[3] });
-				}
-			})
-
-			it("should successfully flip capped blox", async function () {
-				for (i = 1; i <= 10; i++) {
-					assert.equal(await this.Metablox.cappedBlox(i), true, `unmatched capped blox of id ${i}`);
-				}
-			})
-
-			it("should not be able to publicly mint capped blox", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[this.bloxNumber], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						["100000000000000000000"], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
+				await truffleAssert.passes(
+					this.Metablox.capBlox(
+						this.identifier,
+						Array.from({ length: 10 }, (_, i) => i + 1),
+						false,
+						{ from: this.capper }
 					),
-					"the Blox is capped",
-					"should not be able to publicly mint reserved blox",
+					"should be able to cap blox",
 				)
-			})
-
-			after(async function () {
-				for (i = 1; i <= 10; i++) {
-					await this.Metablox.setCappedBloxes(Array.from({ length: 10 }, (_, i) => i + 1), false, { from: accounts[3] })
-				}
 			})
 		})
 
 		context("Of Pause", async function () {
 			before(async function () {
+
 				await truffleAssert.reverts(
-					this.Metablox.pause({ from: accounts[9] }),
+					this.Metablox.pause({ from: this.dummyReceiver }),
 					"Ownable: caller is not the owner",
 					"should fail to pause with non-owner address",
 				)
 				await truffleAssert.reverts(
-					this.Metablox.unpause({ from: accounts[9] }),
+					this.Metablox.unpause({ from: this.dummyReceiver }),
 					"Ownable: caller is not the owner",
 					"should fail to unpause with non-owner address",
 				)
 				// pause
-				await this.Metablox.pause()
+				await this.Metablox.pause({ from: this.owner })
 			})
 
-			it("should not be able to publicly mint reserved blox", async function () {
+			it("should not be able to do custodial mint when paused", async function () {
 				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[this.bloxNumber], // Blox number
+					this.Metablox.custodialBatchMint(
+						this.identifier,
+						this.dummyReceiver,
+						[1], // capped Blox number
+						{ from: this.minter },
+					),
+					"Pausable: paused",
+					"should not be able to publicly mint reserved blox in pause status",
+				)
+			})
+
+			it("should not be able to publicly mint blox", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.publicBatchMint(
+						this.identifier,
+						[10], // Blox number
 						[this.propertyTier], // property tier: 1
 						this.USDT.address, // buy with: USDT
 						["100000000000000000000"], // ERC20 token amount: 100 USDT / 10 ** 20
 						"200", // tolerance: 2%
-						{ from: this.nftOwner },
+						{ from: this.owner },
 					),
 					"Pausable: paused",
 					"should not be able to publicly mint reserved blox in pause status",
@@ -260,656 +255,630 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 			})
 		})
 
-		context("Of Others", async function () {
-			it("should not be able to set blox total supply with non-owner address", async function () {
+		context("Of Miscs", async function () {
+			it("shouldn't be able to set blox supply by non-owner address", async function () {
 				await truffleAssert.reverts(
-					this.Metablox.setTotalBloxSupply(39, { from: accounts[9] }),
+					this.Metablox.setBloxSupply(
+						this.identifier,
+						39,
+						{ from: this.dummyReceiver }
+					),
 					"Ownable: caller is not the owner",
 					"should not be able to set blox total supply by non-owner address",
 				)
 			})
 
-			it("should not be able to set blox total supply with non-owner address", async function () {
+			it("shouldn't be able to set landmark number by non-owner address", async function () {
 				await truffleAssert.reverts(
-					this.Metablox.setTotalBloxSupplyWithLandmark(49, { from: accounts[9] }),
+					this.Metablox.setLandmarkNumber(
+						this.identifier,
+						[1, 2, 3],
+						true,
+						{ from: this.dummyReceiver }
+					),
 					"Ownable: caller is not the owner",
-					"should not be able to set blox total supply with landmark by non-owner address",
+					"should not be able to set blox total supply by non-owner address",
 				)
 			})
 
-			it("should not be able to mint with non-owner address", async function () {
+			it("shouldn't be able to set property level contract by non_owner address", async function () {
 				await truffleAssert.reverts(
-					this.Metablox.mintReservedBlox(
-						this.nftOwner,
-						this.bloxNumber,
-						{ from: accounts[9] }
+					this.Metablox.setPropertyLevelContract(
+						this.identifier,
+						this.propertyLevelContract.address,
+						{ from: this.dummyReceiver }
 					),
-					"caller is not the minter",
-					"should not be able to mint with non-owner address",
-				)
-			})
-		})
-
-		context("Of Batch Mint Bloxes", async function () {
-
-			it("should not be able to batch mint with non-owner address", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintReservedBloxes(
-						this.nftOwner,
-						[1, 2, 3, 4, 5],
-						{ from: accounts[9] }
-					),
-					"caller is not the minter",
-					"should not be able to batch mint with non-minter address",
-				)
-			})
-
-			it("should not be able to batch mint with exceeding length - reserve", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintReservedBloxes(
-						this.nftOwner,
-						Array.from({ length: 21 }, (_, i) => i + 1),
-						{ from: accounts[2] }
-					),
-					"exceed maximum mint amount",
-					"should not be able to batch mint when exceeding length",
-				)
-			})
-
-			it("should not be able to batch mint with mismatch length", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						Array.from({ length: 6 }, (_, i) => i),
-						Array(4).fill(1),
-						this.USDT.address, // buy with: USDT
-						Array(2).fill("100000000000000000000"),
-						"200", // tolerance: 2%
-					),
-					"unmatched length of array",
-					"should not be able to batch mint when length in unmatched",
-				)
-			})
-
-			it("should not be able to batch mint with exceeding length - public", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						Array.from({ length: 6 }, (_, i) => i),
-						Array(6).fill(1),
-						this.USDT.address, // buy with: USDT
-						Array(6).fill("100000000000000000000"),
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					),
-					"exceed maximum mint amount",
-					"should not be able to batch mint when exceeding length",
-				)
-			})
-		})
-
-		context("Of Setting Maximum Mint Amount", async function () {
-			it("should not be able to set public mint amount with non-owner address", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.setMaxPublicMintAmount(10, { from: accounts[9] }),
 					"Ownable: caller is not the owner",
-					"should not be able to setMaxPublicMintAmount",
+					"shouldn't be able to set property level contract by non_owner address",
 				)
 			})
 
-			it("should not be able to set reserve mint amount with non-owner address", async function () {
+			it("shouldn't be able to set memory contract by non_owner address", async function () {
 				await truffleAssert.reverts(
-					this.Metablox.setMaxReserveAmount(10, { from: accounts[9] }),
+					this.Metablox.setMemoryContract(
+						this.identifier,
+						this.propertyLevelContract.address,
+						{ from: this.dummyReceiver }
+					),
 					"Ownable: caller is not the owner",
-					"should not be able to setMaxReserveAmount",
+					"shouldn't be able to set memory contract by non_owner address",
+				)
+			})
+
+			it("shouldn't be able to set royalties by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.setTokenRoyalty(
+						1,
+						this.paymentTokenBeneficiary,
+						200,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to set token royalty by non-owner address",
+				)
+
+				await truffleAssert.reverts(
+					this.Metablox.setDefaultRoyalty(
+						this.paymentTokenBeneficiary,
+						200,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to set default royalty by non-owner address",
+				)
+			})
+
+			it("shouldn't be able to withdraw by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.withdraw({ from: this.dummyReceiver }),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to withdraw by non-owner address",
+				)
+			})
+
+			it("shouldn't be able to add price feed by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.addNewPriceFeed(
+						this.WMATIC.address,
+						this.chainlinkMatic.address,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to add price feed by non-owner address",
+				)
+			})
+
+			it("shouldn't be able to arelease grace period by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.releaseGracePeriod(
+						this.identifier,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to arelease grace period by non-owner address",
 				)
 			})
 		})
 	})
 
-	context("Mint Functionalities", async function () {
-		const TEST_BLOX_SUPPLY = 39;
+	context("mint #1", async function () {
 		before(async function () {
-
-			assert.equal(await this.Metablox.bloxSupply(), TEST_BLOX_SUPPLY, "unmatched total supply");
+			assert.equal(
+				await this.Metablox.getBloxSupply(this.identifier), this.TEST_BLOX_SUPPLY, "unmatched blox supply"
+			);
 		})
-		context("with USDT", async function () {
-			const USDT_100 = "100000000000000000000"
-			let usdtBalance;
-			before("checking USDT allowance", async function () {
-				usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-				await this.USDT.approve(this.Metablox.address, USDT_100, {
-					from: this.nftOwner
+
+		context("with custodial mint", async function () {
+			context("happy path", async function () {
+				it("custodial mint", async function () {
+					tx = await this.Metablox.custodialBatchMint(
+						this.identifier,
+						this.dummyReceiver,
+						[1], // Blox number
+						{ from: this.minter },
+					)
 				})
-				assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_100, "unmatched allowance");
+
+				it("should have correct NFT / Blox owner and supply", async function () {
+					assert.equal(await this.Metablox.ownerOf(0), this.dummyReceiver, "unmatched NFT owner");
+					assert.equal(await this.Metablox.getBloxOwnerByTokenId(0), this.dummyReceiver, "unmatched Blox owner");
+					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 1, "unmatched Blox total supply");
+				});
+
+				it("should have correct token uri", async function () {
+					assert.equal(await this.Metablox.tokenURI(0), `${this.baseURI}${this.uriSuffix}1`, "unmatched NFT owner");
+				});
 			})
 
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.USDT.address, // buy with: USDT
-					[USDT_100], // ERC20 token amount: 100 USDT / 10 ** 20
-					"200", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
-
-			it("should have correct USDT balance", async function () {
-				const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-				const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, USDT_100, "unmatched USDT balance");
-			});
-		})
-
-		context("with WETH", async function () {
-			const WETH_100 = "31456432840515884" // 0.03 WETH at price $3179
-			let wethBalance;
-			before("checking WETH allowance", async function () {
-				wethBalance = await this.WETH.balanceOf(this.nftOwner)
-				await this.WETH.approve(this.Metablox.address, WETH_100, {
-					from: this.nftOwner
+			context("sad path", async function () {
+				it("shouldn't succeed when exceeding maximum length of blox number ", async function () {
+					await truffleAssert.reverts(
+						this.Metablox.custodialBatchMint(
+							this.identifier,
+							this.dummyReceiver,
+							Array(21).fill(10), // Blox number
+							{ from: this.minter },
+						),
+						"exceed maximum mint amount",
+						"should fail when giving an array of length 21"
+					)
 				})
-				assert.equal((await this.WETH.allowance(this.nftOwner, this.Metablox.address)), WETH_100, "unmatched allowance");
-			})
 
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 1], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.WETH.address, // buy with: WETH
-					[WETH_100], // ERC20 token amount: 0.03 WETH 
-					"100", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
+				it("shouldn't succeed when exceeding maximum length of blox number ", async function () {
+					await this.Metablox.setBloxSupply(
+						this.identifier,
+						10,
+					)
+					await truffleAssert.reverts(
+						this.Metablox.custodialBatchMint(
+							this.identifier,
+							this.dummyReceiver,
+							Array(20).fill(10), // Blox number
+							{ from: this.minter },
+						),
+						"exceed maximum blox supply",
+						"should fail when giving an array of length 20"
+					)
 
-			it("should have correct WETH balance", async function () {
-				const tokenBalance = await this.WETH.balanceOf(this.nftOwner)
-				const diff = (new BN(wethBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, WETH_100, "unmatched WETH balance");
-			});
+					await this.Metablox.setBloxSupply(
+						this.identifier,
+						this.TEST_BLOX_SUPPLY,
+					)
+				})
+			})
 		})
 
-		context("with MATIC", async function () {
+		context("with public mint(MATIC)", async function () {
 			const MATIC_100 = "42958629550983520000" // 42.958 MATIC at price $2.327821
 			let maticBalance, gasUsed, gasPrice;
 			let contractMaticBalance;
-			before("checking MATIC allowance", async function () {
-				maticBalance = await web3.eth.getBalance(this.nftOwner)
+			before("MATIC balance check", async function () {
+				maticBalance = await web3.eth.getBalance(this.owner)
 				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
 				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
 				assert.equal(contractMaticBalance, 0, "unmatched MATIC balance of Blox contract");
 			})
 
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 2], // Blox number
+			context("happy path", async function () {
+				it("public mint", async function () {
+					tx = await this.Metablox.publicBatchMint(
+						this.identifier,
+						[2], // Blox number
+						[this.propertyTier], // property tier: 1
+						this.WMATIC.address, // buy with: MATIC
+						[MATIC_100], // MATIC token amount: 42.958 MATIC
+						"100", // tolerance: 1%
+						{ from: this.owner, value: MATIC_100 },
+					)
+					gasUsed = tx.receipt.gasUsed;
+					const _tx = await web3.eth.getTransaction(tx.tx);
+					gasPrice = _tx.gasPrice;
+				})
+
+				it("should have correct MATIC balance of NFT owner", async function () {
+					const tokenBalance = await web3.eth.getBalance(this.owner);
+					// const diff = maticBalance - tokenBalance - (gasPrice * gasUsed);
+					const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
+					const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
+					assert.equal(diff.toString(), MATIC_100, "unmatched MATIC balance");
+				});
+
+				it("should have correct NFT / Blox owner and supply", async function () {
+					assert.equal(await this.Metablox.ownerOf(1), this.owner, "unmatched NFT owner");
+					assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.owner, "unmatched Blox owner");
+					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 2, "unmatched Blox supply");
+				});
+
+				it("should have correct token uri", async function () {
+					assert.equal(await this.Metablox.tokenURI(1), `${this.baseURI}${this.uriSuffix}2`, "unmatched NFT owner");
+				});
+			})
+
+			context("sad path", async function () {
+				it("shouldn't succeed when exceeding maximum length of blox number", async function () {
+					await truffleAssert.reverts(
+						this.Metablox.publicBatchMint(
+							this.identifier,
+							Array(6).fill(10), // Blox number
+							Array(6).fill(this.propertyTier), // property tier: 1
+							this.WMATIC.address, // buy with: MATIC
+							Array(6).fill(MATIC_100), // MATIC token amount: 42.958 MATIC
+							"100", // tolerance: 1%
+							{ from: this.owner, value: MATIC_100 },
+						),
+						"exceed maximum mint amount",
+						"should fail when giving an array of length 6"
+					)
+				})
+
+				it("shouldn't succeed when exceeding maximum length of blox number", async function () {
+					await truffleAssert.reverts(
+						this.Metablox.publicBatchMint(
+							this.identifier,
+							Array(2).fill(10), // Blox number
+							Array(3).fill(this.propertyTier), // property tier: 1
+							this.WMATIC.address, // buy with: MATIC
+							Array(4).fill(MATIC_100), // MATIC token amount: 42.958 MATIC
+							"100", // tolerance: 1%
+							{ from: this.owner, value: MATIC_100 },
+						),
+						"unmatched length of array",
+						"should fail when giving an array of length 6"
+					)
+				})
+
+				it("shouldn't succeed when exceeding maximum length of blox number", async function () {
+					await this.Metablox.setBloxSupply(
+						this.identifier,
+						4,
+					)
+					await truffleAssert.reverts(
+						this.Metablox.publicBatchMint(
+							this.identifier,
+							Array(5).fill(10), // Blox number
+							Array(5).fill(this.propertyTier), // property tier: 1
+							this.WMATIC.address, // buy with: MATIC
+							Array(5).fill(MATIC_100), // MATIC token amount: 42.958 MATIC
+							"100", // tolerance: 1%
+							{ from: this.owner, value: MATIC_100 },
+						),
+						"exceed maximum blox supply",
+						"should fail when giving an array of length 6"
+					)
+					await this.Metablox.setBloxSupply(
+						this.identifier,
+						this.TEST_BLOX_SUPPLY,
+					)
+				})
+
+				it("shouldn't succeed when giving invalid token to pay", async function () {
+					await truffleAssert.reverts(
+						this.Metablox.publicBatchMint(
+							this.identifier,
+							[10], // Blox number
+							[this.propertyTier], // property tier: 1
+							this.dummyReceiver, // buy with: MATIC
+							[MATIC_100], // MATIC token amount: 42.958 MATIC
+							"100", // tolerance: 1%
+							{ from: this.owner, value: MATIC_100 },
+						),
+						"invalid payment token",
+						"should fail when giving an array of length 6"
+					)
+				})
+
+				it("shouldn't succeed when the MATIC amount is insufficient", async function () {
+
+					await truffleAssert.reverts(
+						this.Metablox.publicBatchMint(
+							this.identifier,
+							Array(2).fill(10), // Blox number
+							Array(2).fill(this.propertyTier), // property tier: 1
+							this.WMATIC.address, // buy with: MATIC
+							Array(2).fill(MATIC_100), // MATIC token amount: 42.958 MATIC
+							"100", // tolerance: 1%
+							{ from: this.owner, value: MATIC_100 },
+						),
+						"insufficient matic amount to mint",
+						"should fail when giving an array of length 6"
+					)
+
+				})
+			})
+		})
+
+		context("with authorized wild mint", async function () {
+			context("happy path", async function () {
+				it("wild mint", async function () {
+					await this.Metablox.authorizedWildMint(
+						this.dummyReceiver,
+						1,
+						{ from: this.minter },
+					)
+				})
+
+				it("should have correct token uri", async function () {
+					assert.equal(await this.Metablox.tokenURI(2), `${this.baseURI}wild/2`, "unmatched NFT owner");
+				});
+
+				it("associate to blox", async function () {
+					await this.Metablox.authorizedAssociation(
+						this.identifier,
+						[2], // token id
+						[3], // blox number
+						{ from: this.minter },
+					)
+				})
+
+				it("should have correct NFT / Blox owner and supply", async function () {
+					assert.equal(await this.Metablox.ownerOf(2), this.dummyReceiver, "unmatched NFT owner");
+					assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), this.dummyReceiver, "unmatched NFT owner");
+					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 3, "unmatched Blox supply");
+				});
+			})
+
+			context("sad path", async function () {
+
+			})
+		})
+
+		context("total supply", async function () {
+			it("should be 3 after two mints", async function () {
+				assert.equal(await this.Metablox.totalSupply(), 3, "unmatched total supply");
+				assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 3, "unmatched Blox supply");
+			})
+		})
+
+	})
+
+	context("grace period #1", async function () {
+		before("should have correct data", async function () {
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 2, "unmatched current phase");
+			assert.equal(gp._remainingGP, 1, "unmatched remaining grace period amount");
+		})
+
+		context("with another public mint(MATIC)", async function () {
+			const MATIC_100 = "42958629550983520000" // 42.958 MATIC at price $2.327821
+			let maticBalance, gasUsed, gasPrice;
+			let contractMaticBalance;
+			before("MATIC balance check", async function () {
+				maticBalance = await web3.eth.getBalance(this.owner)
+				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
+				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
+				assert.equal(contractMaticBalance, MATIC_100, "unmatched MATIC balance of Blox contract");
+			})
+
+			it("should have correct MATIC balance of NFT owner", async function () {
+				tx = await this.Metablox.publicBatchMint(
+					this.identifier,
+					[4], // Blox number
 					[this.propertyTier], // property tier: 1
 					this.WMATIC.address, // buy with: MATIC
 					[MATIC_100], // MATIC token amount: 42.958 MATIC
 					"100", // tolerance: 1%
-					{ from: this.nftOwner, value: MATIC_100 },
+					{ from: this.owner, value: MATIC_100 },
 				)
 				gasUsed = tx.receipt.gasUsed;
 				const _tx = await web3.eth.getTransaction(tx.tx);
 				gasPrice = _tx.gasPrice;
-			})
-
-			it("should have correct MATIC balance of NFT owner", async function () {
-				const tokenBalance = await web3.eth.getBalance(this.nftOwner);
-				// const diff = maticBalance - tokenBalance - (gasPrice * gasUsed);
+				const tokenBalance = await web3.eth.getBalance(this.owner);
 				const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
 				const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
 				assert.equal(diff.toString(), MATIC_100, "unmatched MATIC balance");
 			});
+
+			it("should have correct NFT / Blox owner and supply", async function () {
+				assert.equal(await this.Metablox.ownerOf(3), this.owner, "unmatched NFT owner");
+				assert.equal(await this.Metablox.getBloxOwnerByTokenId(3), this.owner, "unmatched Blox owner");
+				assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 4, "unmatched Blox supply");
+			});
+
+			it("should have correct token uri", async function () {
+				assert.equal(await this.Metablox.tokenURI(3), `${this.baseURI}${this.uriSuffix}4`, "unmatched NFT owner");
+			});
 		})
 
-		context("over first grace period", async function () {
-			it("should have correct data", async function () {
-				assert.equal(await this.Metablox.gracePeriodAmount(), 1, "unmatched grace period amount");
-				assert.equal(await this.Metablox.gracePeriodRemaining(), 1, "unmatched grace period remaining");
-				assert.equal(await this.Metablox.gracePeriodCurrent(), 1, "unmatched current grace period");
-				assert.notEqual(await this.Metablox.gracePeriodBlockNumber(1), 0, "unmatched grace period amount");
-			})
+		after(async function () {
+			await this.Metablox.releaseGracePeriod(this.identifier);
 
-			context("with USDT within grace period", async function () {
-				const USDT_100 = "100000000000000000000"
-				let usdtBalance;
-				before("checking USDT allowance", async function () {
-					usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-					await this.USDT.approve(this.Metablox.address, USDT_100, {
-						from: this.nftOwner
-					})
-					assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_100, "unmatched allowance");
-				})
-
-				it("mint blox", async function () {
-					tx = await this.Metablox.batchMintBloxes(
-						[this.bloxNumber + 3], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						[USDT_100], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					)
-				})
-
-				it("should have correct token uri", async function () {
-					const tokenURI = await this.Metablox.tokenURI(this.bloxNumber)
-					assert.equal(tokenURI, `${this.baseUri}${this.bloxNumber}`, "unmatched uri");
-				});
-
-				it("should have correct Blox balance", async function () {
-					const tokenBalance = await this.Metablox.balanceOf(this.nftOwner)
-					assert.equal(tokenBalance, 4, "unmatched Blox balance");
-				});
-
-				it("should have correct USDT balance", async function () {
-					const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-					const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-					assert.equal(diff, USDT_100, "unmatched USDT balance");
-				});
-			})
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 2, "unmatched current phase");
+			assert.equal(gp._remainingGP, 0, "unmatched remaining grace period amount");
 		})
 	})
 
-	context("Mint Functionalities after first grace period", async function () {
-		context("with USDT", async function () {
-			const USDT_150 = "150000000000000000000"
-			let usdtBalance;
-			before("checking USDT allowance", async function () {
-				await this.Metablox.releaseGracePeriod()
-
-				assert.equal(await this.Metablox.gracePeriodAmount(), 1, "unmatched grace period amount");
-				assert.equal(await this.Metablox.gracePeriodRemaining(), 0, "unmatched grace period remaining");
-				assert.equal(await this.Metablox.gracePeriodCurrent(), 1, "unmatched current grace period");
-				assert.equal(await this.Metablox.gracePeriodBlockNumber(2), 0, "unmatched grace period amount");
-
-				usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-				await this.USDT.approve(this.Metablox.address, USDT_150, {
-					from: this.nftOwner
-				})
-				assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_150, "unmatched allowance");
-
-			})
-
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 4], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.USDT.address, // buy with: USDT
-					[USDT_150], // ERC20 token amount: 100 USDT / 10 ** 20
-					"200", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
-
-			it("should have correct USDT balance", async function () {
-				const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-				const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, USDT_150, "unmatched USDT balance");
-			});
+	context("mint #2", async function () {
+		const MATIC_100 = "42958629550983520000" // 42.958 MATIC at price $2.327821
+		const MATIC_150 = "64437944326475284000" // 64.438 MATIC at price $2.327821
+		let maticBalance, gasUsed, gasPrice;
+		let contractMaticBalance;
+		before("MATIC balance check", async function () {
+			maticBalance = await web3.eth.getBalance(this.owner)
+			contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
+			assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
+			// two public mint happened
+			assert.equal(contractMaticBalance, new BN(MATIC_100).mul(new BN(2)).toString(), "unmatched MATIC balance of Blox contract");
 		})
 
-		context("with WETH", async function () {
-			const WETH_100 = "47184649260773820" // 0.03 WETH at price $3179
-			let wethBalance;
-			before("checking WETH allowance", async function () {
-				wethBalance = await this.WETH.balanceOf(this.nftOwner)
-				await this.WETH.approve(this.Metablox.address, WETH_100, {
-					from: this.nftOwner
-				})
-				assert.equal((await this.WETH.allowance(this.nftOwner, this.Metablox.address)), WETH_100, "unmatched allowance");
-			})
+		it("should have correct MATIC balance of NFT owner", async function () {
+			tx = await this.Metablox.publicBatchMint(
+				this.identifier,
+				[5, 6], // Blox number
+				Array(2).fill(this.propertyTier), // property tier: 1
+				this.WMATIC.address, // buy with: MATIC
+				Array(2).fill(MATIC_150), // MATIC token amount: 42.958 MATIC
+				"100", // tolerance: 1%
+				{ from: this.owner, value: new BN(MATIC_150).mul(new BN(2)).toString() },
+			)
+			gasUsed = tx.receipt.gasUsed;
+			const _tx = await web3.eth.getTransaction(tx.tx);
+			gasPrice = _tx.gasPrice;
+			const tokenBalance = await web3.eth.getBalance(this.owner);
+			const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
+			const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
+			assert.equal(diff.toString(), new BN(MATIC_150).mul(new BN(2)).toString(), "unmatched MATIC balance");
+		});
 
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 5], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.WETH.address, // buy with: WETH
-					[WETH_100], // ERC20 token amount: 0.03 WETH 
-					"100", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
+		it("should have correct NFT / Blox owner and supply", async function () {
+			assert.equal(await this.Metablox.ownerOf(4), this.owner, "unmatched NFT owner");
+			assert.equal(await this.Metablox.getBloxOwnerByTokenId(4), this.owner, "unmatched Blox owner");
+			assert.equal(await this.Metablox.ownerOf(5), this.owner, "unmatched NFT owner");
+			assert.equal(await this.Metablox.getBloxOwnerByTokenId(5), this.owner, "unmatched Blox owner");
+			assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 6, "unmatched Blox supply");
+		});
 
-			it("should have correct WETH balance", async function () {
-				const tokenBalance = await this.WETH.balanceOf(this.nftOwner)
-				const diff = (new BN(wethBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, WETH_100, "unmatched WETH balance");
-			});
-		})
+		it("should have correct token uri", async function () {
+			assert.equal(await this.Metablox.tokenURI(4), `${this.baseURI}${this.uriSuffix}5`, "unmatched NFT owner");
+			assert.equal(await this.Metablox.tokenURI(5), `${this.baseURI}${this.uriSuffix}6`, "unmatched NFT owner");
+		});
 
-		context("entering second grace period", async function () {
-			it("should have correct data", async function () {
-				assert.equal(await this.Metablox.gracePeriodAmount(), 2, "unmatched grace period amount");
-				assert.equal(await this.Metablox.gracePeriodRemaining(), 1, "unmatched grace period remaining");
-				assert.equal(await this.Metablox.gracePeriodCurrent(), 2, "unmatched current grace period");
-				assert.notEqual(await this.Metablox.gracePeriodBlockNumber(2), 0, "unmatched grace period amount");
-			})
-
-			context("with USDT within second grace period", async function () {
-				const USDT_150 = "150000000000000000000"
-				let usdtBalance;
-				before("checking USDT allowance", async function () {
-					usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-					await this.USDT.approve(this.Metablox.address, USDT_150, {
-						from: this.nftOwner
-					})
-					assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_150, "unmatched allowance");
-				})
-
-				it("mint blox", async function () {
-					tx = await this.Metablox.batchMintBloxes(
-						[this.bloxNumber + 6], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						[USDT_150], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					)
-				})
-
-				it("should have correct token uri", async function () {
-					const tokenURI = await this.Metablox.tokenURI(this.bloxNumber)
-					assert.equal(tokenURI, `${this.baseUri}${this.bloxNumber}`, "unmatched uri");
-				});
-
-				it("should have correct Blox balance", async function () {
-					const tokenBalance = await this.Metablox.balanceOf(this.nftOwner)
-					assert.equal(tokenBalance, 7, "unmatched Blox balance");
-				});
-
-				it("should have correct USDT balance", async function () {
-					const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-					const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-					assert.equal(diff, USDT_150, "unmatched USDT balance");
-				});
-			})
+		after(async function () {
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 3, "unmatched current phase");
+			assert.equal(gp._remainingGP, 1, "unmatched remaining grace period amount");
 		})
 
 	})
 
-	context("Reserved blox minting functionalities after second grace period", async function () {
-		before(async function () {
-			// release second gp
-			await this.Metablox.releaseGracePeriod()
-			// mint two more blox to make sure that it enters third gp
-			for (i = 0; i < 2; i++) {
-				await this.Metablox.mintReservedBlox(
-					this.nftOwner,
-					this.bloxNumber + 7 + i, // Blox number
-					{ from: accounts[2] }
-				)
-			}
-		})
-
-		context("entering third grace period", async function () {
-			it("should have correct data", async function () {
-				assert.equal(await this.Metablox.gracePeriodAmount(), 3, "unmatched grace period amount");
-				assert.equal(await this.Metablox.gracePeriodRemaining(), 1, "unmatched grace period remaining");
-				assert.equal(await this.Metablox.gracePeriodCurrent(), 3, "unmatched current grace period");
-				assert.notEqual(await this.Metablox.gracePeriodBlockNumber(3), 0, "unmatched grace period amount");
-			})
-		})
-
-		context("with USDT within third grace period", async function () {
-			const USDT_225 = "225000000000000000000"
-			let usdtBalance;
-			before("checking USDT allowance", async function () {
-				usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-				await this.USDT.approve(this.Metablox.address, USDT_225, {
-					from: this.nftOwner
-				})
-				assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_225, "unmatched allowance");
-			})
-
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 9], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.USDT.address, // buy with: USDT
-					[USDT_225], // ERC20 token amount: 100 USDT / 10 ** 20
-					"200", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
-
-			it("should have correct USDT balance", async function () {
-				const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-				const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, USDT_225, "unmatched USDT balance");
-			});
-		})
-	})
-
-	context("Mint Functionalities after third grace period", async function () {
-		context("with USDT", async function () {
-			const USDT_338 = "338000000000000000000"
-			let usdtBalance;
-			before("checking USDT allowance", async function () {
-				await this.Metablox.releaseGracePeriod()
-				usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-				await this.USDT.approve(this.Metablox.address, USDT_338, {
-					from: this.nftOwner
-				})
-				assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_338, "unmatched allowance");
-
-			})
-
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 10], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.USDT.address, // buy with: USDT
-					[USDT_338], // ERC20 token amount: 100 USDT / 10 ** 20
-					"200", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
-
-			it("should have correct USDT balance", async function () {
-				const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-				const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, USDT_338, "unmatched USDT balance");
-			});
-		})
-
-		context("with WETH", async function () {
-			const WETH_338 = "106165460836741100" // 0.03 WETH at price $3179
-			let wethBalance;
-			before("checking WETH allowance", async function () {
-				wethBalance = await this.WETH.balanceOf(this.nftOwner)
-				await this.WETH.approve(this.Metablox.address, WETH_338, {
-					from: this.nftOwner
-				})
-				assert.equal((await this.WETH.allowance(this.nftOwner, this.Metablox.address)), WETH_338, "unmatched allowance");
-			})
-
-			it("mint blox", async function () {
-				tx = await this.Metablox.batchMintBloxes(
-					[this.bloxNumber + 11], // Blox number
-					[this.propertyTier], // property tier: 1
-					this.WETH.address, // buy with: WETH
-					[WETH_338], // ERC20 token amount: 0.03 WETH 
-					"100", // tolerance: 2%
-					{ from: this.nftOwner },
-				)
-			})
-
-			it("should have correct WETH balance", async function () {
-				const tokenBalance = await this.WETH.balanceOf(this.nftOwner)
-				const diff = (new BN(wethBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-				assert.equal(diff, WETH_338, "unmatched WETH balance");
-			});
-		})
-
-		context("entering fourth grace period", async function () {
-			it("should have correct data", async function () {
-				assert.equal(await this.Metablox.gracePeriodAmount(), 4, "unmatched grace period amount");
-				assert.equal(await this.Metablox.gracePeriodRemaining(), 1, "unmatched grace period remaining");
-				assert.equal(await this.Metablox.gracePeriodCurrent(), 4, "unmatched current grace period");
-				assert.notEqual(await this.Metablox.gracePeriodBlockNumber(4), 0, "unmatched grace period amount");
-			})
-
-			context("with USDT within second grace period", async function () {
-				const USDT_338 = "338000000000000000000"
-				let usdtBalance;
-				before("checking USDT allowance", async function () {
-					usdtBalance = await this.USDT.balanceOf(this.nftOwner)
-					await this.USDT.approve(this.Metablox.address, USDT_338, {
-						from: this.nftOwner
-					})
-					assert.equal((await this.USDT.allowance(this.nftOwner, this.Metablox.address)), USDT_338, "unmatched allowance");
-				})
-
-				it("mint blox", async function () {
-					tx = await this.Metablox.batchMintBloxes(
-						[this.bloxNumber + 12], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						[USDT_338], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					)
-				})
-
-				it("should have correct USDT balance", async function () {
-					const tokenBalance = await this.USDT.balanceOf(this.nftOwner)
-					const diff = (new BN(usdtBalance, 10).sub(new BN(tokenBalance, 10))).toString(10);
-					assert.equal(diff, USDT_338, "unmatched USDT balance");
-				});
-			})
-		})
-
-	})
-
-
-	context("With All The Bloxes Minted", async function () {
-		before(async function () {
-			for (let i = 13; i < 30; i++) {
-				await truffleAssert.passes(
-					this.Metablox.mintReservedBlox(this.nftOwner, this.bloxNumber + i, { from: accounts[2] }),
-					"should be able to mint the rest of blox for nft owner",
-				)
-			}
-
-			await truffleAssert.passes(
-				this.Metablox.batchMintReservedBloxes(
-					this.nftOwner,
-					Array.from({ length: 9 }, (_, i) => this.bloxNumber + 30 + i),
-					{ from: accounts[2] },
-				),
-				"should be able to batch mint",
+	context("mint #3", async function () {
+		it("wild mint and association", async function () {
+			await this.Metablox.authorizedWildMint(
+				this.dummyReceiver,
+				3,
+				{ from: this.minter },
+			)
+			// token uri examination
+			assert.equal(await this.Metablox.tokenURI(6), `${this.baseURI}wild/6`, "unmatched NFT owner");
+			assert.equal(await this.Metablox.tokenURI(7), `${this.baseURI}wild/7`, "unmatched NFT owner");
+			assert.equal(await this.Metablox.tokenURI(8), `${this.baseURI}wild/8`, "unmatched NFT owner");
+			// shouldn't enter grace period when doing a wild mint
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 3, "unmatched current phase");
+			assert.equal(gp._remainingGP, 1, "unmatched remaining grace period amount");
+			// actuall association
+			await this.Metablox.authorizedAssociation(
+				this.identifier,
+				[6, 7, 8], // token id
+				[7, 8, 9], // blox number
+				{ from: this.minter },
 			)
 		})
 
-		it("should have correct grace period data", async function () {
-			assert.equal(await this.Metablox.gracePeriodAmount(), 10, "unmatched grace period amount");
-			assert.equal(await this.Metablox.gracePeriodRemaining(), 7, "unmatched grace period remaining");
-			assert.equal(await this.Metablox.gracePeriodCurrent(), 4, "unmatched current grace period");
-			for (let i = 5; i <= 10; i++) {
-				assert.notEqual(await this.Metablox.gracePeriodBlockNumber(i), 0, `unmatched block number of ${i}th grace period`);
-			}
-		})
-
-		it("should not be marked as all sold", async function () {
-			assert.equal(await this.Metablox.allBloxesSold(), false, "unmatched allBloxesSold");
-		})
-
-		context("Of Sad Path", async function () {
-			it("shouldn't be able to mint", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[this.bloxNumber], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						["100000000000000000000"], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					),
-					"exceed maximum blox supply",
-					"should not be able to publicly mint after sold out",
-				)
-
-				await truffleAssert.reverts(
-					this.Metablox.mintReservedBlox(
-						this.nftOwner,
-						this.bloxNumber,
-					),
-					"Bloxes are all sold",
-					"should not be able to mint after sold out",
-				)
-			})
-		})
-
-		context("Of Grace Period Releasing", async function () {
-			it("should have correct base price after each releasing", async function () {
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 338, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 506, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 759, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 1139, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 1709, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 2563, "unmatched base price")
-				await this.Metablox.releaseGracePeriod()
-				assert.equal(await this.Metablox.getBasePriceFromPropertyTier(1), 3844, "unmatched base price")
-			})
+		after(async function () {
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 4, "unmatched current phase");
+			assert.equal(gp._remainingGP, 2, "unmatched remaining grace period amount");
 		})
 	})
 
-	context("With Landmark Mint", async function () {
-		context("with sad path", async function () {
-			it("should not be able to mint landmark", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[40], // Blox number
-						[this.propertyTier], // property tier: 1
-						this.USDT.address, // buy with: USDT
-						["100000000000000000000"], // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					),
-					"the Blox is a Landmark",
-					"should not be able to publicly mint reserved blox",
-				)
+	context("mint #4", async function () {
+		const MATIC_150 = "64437944326475284000" // 64.438 MATIC at price $2.327821
+		const MATIC_225 = "96656916489712930000" // 64.438 MATIC at price $2.327821
+		const MATIC_337 = "144985374734569390000" // 64.438 MATIC at price $2.327821
+		let maticBalance, gasUsed, gasPrice;
+		let contractMaticBalance;
+		// test with public mint
+		context("without releasing grace period", async function () {
+			before("MATIC balance check", async function () {
+				
+				maticBalance = await web3.eth.getBalance(this.owner)
+				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
+				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
+				// two public mint happened
+				// assert.equal(contractMaticBalance, new BN(MATIC_150).mul(new BN(2)).toString(), "unmatched MATIC balance of Blox contract");
+				// reset contract balance
+				await this.Metablox.withdraw();
 			})
 
-			it("should not be able to do a batch mint landmark", async function () {
-				await truffleAssert.reverts(
-					this.Metablox.batchMintBloxes(
-						[40, 41, 12345], // Blox number
-						Array(3).fill(this.propertyTier), // property tier: 1
-						this.USDT.address, // buy with: USDT
-						Array(3).fill("100000000000000000000"), // ERC20 token amount: 100 USDT / 10 ** 20
-						"200", // tolerance: 2%
-						{ from: this.nftOwner },
-					),
-					"the Blox is a Landmark",
-					"should not be able to publicly mint reserved blox",
+			it("should have correct MATIC balance of NFT owner", async function () {
+				tx = await this.Metablox.publicBatchMint(
+					this.identifier,
+					[10], // Blox number
+					[this.propertyTier], // property tier: 1
+					this.WMATIC.address, // buy with: MATIC
+					[MATIC_150], // MATIC token amount: 42.958 MATIC
+					"100", // tolerance: 1%
+					{ from: this.owner, value: MATIC_150 },
 				)
+				gasUsed = tx.receipt.gasUsed;
+				const _tx = await web3.eth.getTransaction(tx.tx);
+				gasPrice = _tx.gasPrice;
+				const tokenBalance = await web3.eth.getBalance(this.owner);
+				const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
+				const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
+				// assert.equal(diff.toString(), MATIC_150, "unmatched MATIC balance");
+			});
+		})
+
+		// test with public mint
+		context("releasing grace period #2", async function () {
+			before("MATIC balance check", async function () {
+				maticBalance = await web3.eth.getBalance(this.owner)
+				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
+				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
+				// two public mint happened
+				assert.equal(contractMaticBalance, MATIC_150, "unmatched MATIC balance of Blox contract");
+				// reset contract balance
+				await this.Metablox.withdraw();
+				await this.Metablox.releaseGracePeriod(this.identifier);
 			})
+
+			it("should have correct MATIC balance of NFT owner", async function () {
+				tx = await this.Metablox.publicBatchMint(
+					this.identifier,
+					[11], // Blox number
+					[this.propertyTier], // property tier: 1
+					this.WMATIC.address, // buy with: MATIC
+					[MATIC_225], // MATIC token amount: 42.958 MATIC
+					"100", // tolerance: 1%
+					{ from: this.owner, value: MATIC_225 },
+				)
+				gasUsed = tx.receipt.gasUsed;
+				const _tx = await web3.eth.getTransaction(tx.tx);
+				gasPrice = _tx.gasPrice;
+				const tokenBalance = await web3.eth.getBalance(this.owner);
+				const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
+				const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
+				// assert.equal(diff.toString(), MATIC_225, "unmatched MATIC balance");
+			});
+		})
+
+		// test with public mint
+		context("releasing grace period #2", async function () {
+			before("MATIC balance check", async function () {
+				maticBalance = await web3.eth.getBalance(this.owner)
+				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
+				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
+				// two public mint happened
+				assert.equal(contractMaticBalance, MATIC_225, "unmatched MATIC balance of Blox contract");
+				// reset contract balance
+				await this.Metablox.withdraw();
+				await this.Metablox.releaseGracePeriod(this.identifier);
+			})
+
+			it("should have correct MATIC balance of NFT owner", async function () {
+				tx = await this.Metablox.publicBatchMint(
+					this.identifier,
+					[12], // Blox number
+					[this.propertyTier], // property tier: 1
+					this.WMATIC.address, // buy with: MATIC
+					[MATIC_337], // MATIC token amount: 42.958 MATIC
+					"100", // tolerance: 1%
+					{ from: this.owner, value: MATIC_337 },
+				)
+				gasUsed = tx.receipt.gasUsed;
+				const _tx = await web3.eth.getTransaction(tx.tx);
+				gasPrice = _tx.gasPrice;
+				const tokenBalance = await web3.eth.getBalance(this.owner);
+				const gasConsumed = new BN(gasPrice).mul(new BN(gasUsed));
+				const diff = new BN(maticBalance).sub(new BN(tokenBalance)).sub(gasConsumed);
+				// assert.equal(diff.toString(), MATIC_337, "unmatched MATIC balance");
+			});
+		})
+
+
+		after(async function () {
+			const gp = await this.Metablox.getGracePeriod(this.identifier);
+			assert.equal(gp._currPhase, 5, "unmatched current phase");
+			assert.equal(gp._remainingGP, 1, "unmatched remaining grace period amount");
 		})
 	})
 
-
-	context("Total Supply Functionalities", async function () {
+	context.skip("Total Supply Functionalities", async function () {
 		it("should have correct token total supply", async function () {
 			const totalSupply = await this.Metablox.totalSupply()
-			assert.equal(totalSupply, 39, "unmatched total supply");
+			assert.equal(totalSupply, this.TEST_BLOX_SUPPLY, "unmatched total supply");
 		});
 	})
 
-	context("With property level", async function () {
+	context("property level", async function () {
 		it("should have correct balance of attr - blox 1", async function () {
-			for (i = 0; i < 3; i++) {
-				const _level = await this.propertyLevelContract.balanceOf(this.bloxNumber + i, 1);
-				const _marks = await this.propertyLevelContract.balanceOf(this.bloxNumber + i, 2);
-				const _slot = await this.propertyLevelContract.balanceOf(this.bloxNumber + i, 3);
-				const _mrStorage = await this.propertyLevelContract.balanceOf(this.bloxNumber + i, 4);
+			for (i = 1; i <= 12; i++) {
+				const _level = await this.propertyLevelContract.balanceOf(i, 1);
+				const _marks = await this.propertyLevelContract.balanceOf(i, 2);
+				const _slot = await this.propertyLevelContract.balanceOf(i, 3);
+				const _mrStorage = await this.propertyLevelContract.balanceOf(i, 4);
 
 				assert.equal(_level, 1, "unmatched level");
 				assert.equal(_marks, 0, "unmatched level");
@@ -919,21 +888,10 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		});
 	})
 
-	context("Withdraw Functionalities", async function () {
-		it("should not be able to withdraw with non-benificiary", async function () {
-			await truffleAssert.reverts(
-				this.Metablox.withdraw(
-					{ from: this.nftOwner },
-				),
-				"benificiary account only",
-				"should be fail to withdraw with non-benefiary account"
-			)
-
-		})
-
+	context("withdraw", async function () {
 		it("should be able to withdraw by benificiary", async function () {
 			tx = await this.Metablox.withdraw(
-				{ from: this.testTokenBenificiary },
+				{ from: this.owner },
 			)
 		})
 
@@ -943,25 +901,15 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		});
 	})
 
-	context("Royalties Functionalities", async function () {
-		context("with Opensea contract-level metadata", async function () {
-			before(async function () {
-				await this.Metablox.setContractURI("http://fake.contrac.uri")
-			})
-
-			it("should have correct contract uri", async function () {
-				assert.equal(await this.Metablox.contractURI(), "http://fake.contrac.uri", "unmatched contract uri");
-			})
-		})
-
+	context("royalties", async function () {
 		context("with ERC-2981 onchain royalties", async function () {
 			before(async function () {
-				await this.Metablox.setDefaultRoyalty(this.testTokenBenificiary, 100);
+				await this.Metablox.setDefaultRoyalty(this.paymentTokenBeneficiary, 100);
 			})
 
 			it("should get default royalty info", async function () {
 				const royaltyInfo = await this.Metablox.royaltyInfo(87, "100000000000000000000")
-				assert.equal(royaltyInfo[0], this.testTokenBenificiary, "unmatched royalty benificiary");
+				assert.equal(royaltyInfo[0], this.paymentTokenBeneficiary, "unmatched royalty benificiary");
 				assert.equal(royaltyInfo[1], "1000000000000000000", "unmatched royalty amount");
 			})
 

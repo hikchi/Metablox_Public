@@ -33,7 +33,7 @@ module.exports = {
    *
    * $ truffle test --network <network-name>
    */
-  plugins: ["solidity-coverage"],
+  plugins: ["solidity-coverage", "truffle-contract-size"],
 
   networks: {
     // Useful for testing. The `development` name is special - truffle uses it by default
@@ -46,7 +46,6 @@ module.exports = {
       host: "127.0.0.1",     // Localhost (default: none)
       port: 8545,            // Standard Ethereum port (default: none)
       network_id: "*",       // Any network (default: none)
-      gas: 2000000000,
     },
     mumbai: {
       provider: () => new HDWalletProvider(mnemonic, `https://polygon-mumbai.g.alchemy.com/v2/eCgCS8LA0qJ5ZD10IQyoSGvr00GaBORt`),
