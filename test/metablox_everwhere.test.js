@@ -12,6 +12,7 @@ const truffleAssert = require('truffle-assertions');
 const BN = require('bn.js');
 
 const { deployProxy } = require('@openzeppelin/truffle-upgrades');
+const { assert } = require('chai');
 
 /*
  * uncomment accounts to access the test accounts made available by the
@@ -348,14 +349,38 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 				)
 			})
 
-			it("shouldn't be able to arelease grace period by non-owner address", async function () {
+			it("shouldn't be able to release grace period by non-owner address", async function () {
 				await truffleAssert.reverts(
 					this.Metablox.releaseGracePeriod(
 						this.identifier,
 						{ from: this.dummyReceiver }
 					),
 					"Ownable: caller is not the owner",
-					"shouldn't be able to arelease grace period by non-owner address",
+					"shouldn't be able to release grace period by non-owner address",
+				)
+			})
+
+			it("shouldn't be able to flip public mint by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.flipGracePeriod(
+						this.identifier,
+						true,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to flip public mint by non-owner address",
+				)
+			})
+
+			it("shouldn't be able to flip public mint by non-owner address", async function () {
+				await truffleAssert.reverts(
+					this.Metablox.flipPublicMint(
+						this.identifier,
+						true,
+						{ from: this.dummyReceiver }
+					),
+					"Ownable: caller is not the owner",
+					"shouldn't be able to flip public mint by non-owner address",
 				)
 			})
 		})
@@ -453,6 +478,28 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					gasUsed = tx.receipt.gasUsed;
 					const _tx = await web3.eth.getTransaction(tx.tx);
 					gasPrice = _tx.gasPrice;
+				})
+
+				context("token transfer", async function () {
+					before(async function () {
+						await truffleAssert.passes(
+							this.Metablox.transferFrom(this.owner, this.dummyReceiver, 1),
+							"should successfully transfer token to owner",
+						);
+					})
+					it("should successfully transfer a wild token", async function () {
+						assert.equal(await this.Metablox.ownerOf(1), this.dummyReceiver, "unmatched NFT owner");
+						assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.dummyReceiver, "unmatched Blox owner");
+					});
+					after(async function () {
+						await truffleAssert.passes(
+							this.Metablox.safeTransferFrom(this.dummyReceiver, this.owner, 1, { from: this.dummyReceiver }),
+							"should successfully transfer token back to dummy receiver",
+						);
+
+						assert.equal(await this.Metablox.ownerOf(1), this.owner, "unmatched NFT owner");
+						assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.owner, "unmatched Blox owner");
+					})
 				})
 
 				it("should have correct MATIC balance of NFT owner", async function () {
@@ -575,12 +622,36 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 						1,
 						{ from: this.minter },
 					)
+					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 2, "unmatched Blox supply after wild mint");
+				})
+
+				context("token transfer", async function () {
+					before(async function () {
+						await truffleAssert.passes(
+							this.Metablox.safeTransferFrom(this.dummyReceiver, this.owner, 2, { from: this.dummyReceiver }),
+							"should successfully transfer token to owner",
+						);
+					})
+					it("should successfully transfer a wild token", async function () {
+						assert.equal(await this.Metablox.ownerOf(2), this.owner, "unmatched NFT owner");
+						assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
+					});
+					after(async function () {
+						await truffleAssert.passes(
+							this.Metablox.safeTransferFrom(this.owner, this.dummyReceiver, 2),
+							"should successfully transfer token back to dummy receiver",
+						);
+
+						assert.equal(await this.Metablox.ownerOf(2), this.dummyReceiver, "unmatched NFT owner");
+						assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
+					})
 				})
 
 				it("should have correct token uri", async function () {
 					assert.equal(await this.Metablox.tokenURI(2), `${this.baseURI}wild/2`, "unmatched NFT owner");
 				});
 
+				context("token association", async function () {
 				it("associate to blox", async function () {
 					await this.Metablox.authorizedAssociation(
 						this.identifier,
@@ -596,6 +667,10 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 3, "unmatched Blox supply");
 				});
 			})
+
+			})
+
+
 
 			context("sad path", async function () {
 

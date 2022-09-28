@@ -1,5 +1,5 @@
-const { deployProxy, upgradeProxy } = require('@openzeppelin/truffle-upgrades');
-const MetabloxV2 = artifacts.require("MetabloxV2");
+const { deployProxy } = require('@openzeppelin/truffle-upgrades');
+const MetabloxV2WithAccessControl = artifacts.require("MetabloxV2WithAccessControl");
 const PropertyTier = artifacts.require("PropertyTier");
 const PropertyLevel = artifacts.require("PropertyLevel");
 
@@ -20,11 +20,11 @@ module.exports = async function (deployer, network, accounts) {
     }
 
     if (network === "mumbai") {
-      console.log("Deploy with LA on Mumbai...")
+      console.log("Deploy with Miami on Mumbai...")
       // get existing contract of tier, level, and memories
-      // const _propertyTierInstance = await PropertyTier.at("0x435491DA9d4e7b0FBb890c2415989790E6c1F279");
-      // const _propertyLevelInstance = await PropertyLevel.at("0xB92E061625E8553A51cdC00D652DC4628993361a");
-      // const _memoriesInstance = await MetabloxMemories.at("0x621dd38F3a9968B82da87ec733fa3434A34C5B06");
+      // const _propertyTierInstance = await PropertyTier.at("0x5552bbA6F98A964E7698a153c10ca9b387E1241e");
+      // const _propertyLevelInstance = await PropertyLevel.at("0x110fCAc1f393aacB5f8836e8f2529d62AcE0F558");
+      // const _memoriesInstance = await MetabloxMemories.at("0x874B1D3476067b0D6EE630e00979e8766751d496");
       await deployer.deploy(PropertyTier)
       await deployer.deploy(PropertyLevel)
       await deployer.deploy(MetabloxMemories)
@@ -41,19 +41,16 @@ module.exports = async function (deployer, network, accounts) {
       const WETH_CHAINLINK = "0x0715A7794a1dc8e42615F059dD6e406A6594651A";
       const MATIC_CHAINLINK = "0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada";
       // deploy metablox v2
-      const _metabloxV2Instance = await deployProxy(MetabloxV2, [
+      const _metabloxV2Instance = await deployProxy(MetabloxV2WithAccessControl, [
         "Metablox",
-        "Blox-LA",
+        "Blox-MI",
         accounts[0],
         _propertyTierInstance.address,
         _propertyLevelInstance.address,
         [USDT_ADDRESS, WETH_ADDRESS, WMATIC_ADDRESS, WETH_CHAINLINK, MATIC_CHAINLINK],
       ], { deployer });
-
-      // const _metabloxV2Instance = await MetabloxV2.at("0xF061Da1298d4A8F5f562fEB2918e3d541e145808")
       // set blox contract and memory
       await _memoriesInstance.setBloxContract(_metabloxV2Instance.address);
-
       await deployer.deploy(MetabloxController,
         _metabloxV2Instance.address,    // blox contract
         _memoriesInstance.address,      // memori contract
@@ -61,10 +58,9 @@ module.exports = async function (deployer, network, accounts) {
       )
       // get controller instance
       const _controllerInstance = await MetabloxController.deployed();
-      // const _controllerInstance = await MetabloxController.at("0x1444e9b742C24fE052785BB1697f8A51a52788Eb");
       await _memoriesInstance.setBloxController(_controllerInstance.address);
 
-      // // Set up for property level
+      // Set up for property level
       const ATTACH_ROLE = await _propertyLevelInstance.ATTACH_ROLE()
       await _propertyLevelInstance.grantRole(ATTACH_ROLE, _metabloxV2Instance.address)
 
@@ -74,9 +70,9 @@ module.exports = async function (deployer, network, accounts) {
         ["level", "memory marks", "memory slot", "metarent storage"],
         ["level", "memory marks", "memory slot", "metarent storage"],
       );
-      // // set up blox supply
-      await _metabloxV2Instance.setTotalBloxSupply(4534);
-      await _metabloxV2Instance.setTotalBloxSupplyWithLandmark(4568);
+      // set up blox supply
+      await _metabloxV2Instance.setTotalBloxSupply(3809);
+      await _metabloxV2Instance.setTotalBloxSupplyWithLandmark(3845);
       // to-do: setup landmark list
       // finish
       console.log(`Deployed on ${network} with address ${_metabloxV2Instance.address}`);
@@ -94,15 +90,15 @@ module.exports = async function (deployer, network, accounts) {
         metablox: _metabloxV2Instance.address,
       }
 
-      console.log("LA:", result)
-      fs.writeFileSync(`${__dirname}/../data/${moment().tz('Asia/Taipei').format('YYYYMMDD')}_${network}_ny.json`, JSON.stringify(result, null, 2), {
+      console.log("Miami:", result)
+      fs.writeFileSync(`${__dirname}/../data/${moment().tz('Asia/Taipei').format('YYYYMMDD')}_${network}_miami.json`, JSON.stringify(result, null, 2), {
         encoding: "utf8",
         flag: "wx",
       })
     }
 
   } else {
-    // deploy tier, level, and memories to mainnet
+    // deploy tier, level, and memories
     await deployer.deploy(PropertyTier)
     await deployer.deploy(PropertyLevel)
     await deployer.deploy(MetabloxMemories)
@@ -119,7 +115,7 @@ module.exports = async function (deployer, network, accounts) {
     const WETH_CHAINLINK = "0xF9680D99D6C9589e2a93a78A04A279e509205945";
     const MATIC_CHAINLINK = "0xAB594600376Ec9fD91F8e885dADF0CE036862dE0";
     // deploy metablox v2 contract
-    const _metabloxV2Instance = await deployProxy(MetabloxV2, [
+    const _metabloxV2Instance = await deployProxy(MetabloxV2WithAccessControl, [
       accounts[1],
       _propertyTierInstance.address,
       _propertyLevelInstance.address,
@@ -128,14 +124,14 @@ module.exports = async function (deployer, network, accounts) {
     // set blox contract and memory
     await _memoriesInstance.setBloxContract(_metabloxV2Instance.address);
     // deploy controller contract
-    await deployer.deploy(MetabloxController,
-      _metabloxV2Instance.address,    // blox contract
-      _memoriesInstance.address,      // memori contract
-      _propertyLevelInstance.address, // property level contract
-    )
+    // await deployer.deploy(MetabloxController,
+    //   _metabloxV2Instance.address,    // blox contract
+    //   _memoriesInstance.address,      // memori contract
+    //   _propertyLevelInstance.address, // property level contract
+    // )
     // get controller instance
-    const _controllerInstance = await MetabloxController.deployed();
-    console.log(`Deployed controller on ${network} with address ${_controllerInstance.address}`);
+    // const _controllerInstance = await MetabloxController.deployed();
+    // console.log(`Deployed controller on ${network} with address ${_controllerInstance.address}`);
     // Set up for property level
     const ATTACH_ROLE = await _propertyLevelInstance.ATTACH_ROLE();
     await _propertyLevelInstance.grantRole(ATTACH_ROLE, _metabloxV2Instance.address);
@@ -147,12 +143,10 @@ module.exports = async function (deployer, network, accounts) {
       ["level", "memory marks", "memory slot", "metarent storage"],
     );
     // set up blox supply
-    // await _metabloxV2Instance.setTotalBloxSupply(4534);
-    // await _metabloxV2Instance.setTotalBloxSupplyWithLandmark(4568);
-    // pause for LA
-    await _metabloxV2Instance.pause();
+    await _metabloxV2Instance.setTotalBloxSupply(3809);
+    await _metabloxV2Instance.setTotalBloxSupplyWithLandmark(3845);
     // setup landmark list
-    // await _metabloxV2Instance.setLandmarkNumber([1379, 4282, 3519, 1039, 32, 3434, 3527, 29, 26, 23, 42, 3643, 9, 904, 1043, 1102, 1328, 1369, 8, 1464, 1808, 3521, 3518, 3529, 3638, 4284, 4285, 4281, 4280, 10, 4518, 3646, 4283, 3516], true)
+    // await _metabloxV2Instance.setLandmarkNumber([2354, 3359, 3809, 2758, 3841, 2378, 2373, 2364, 1285, 2021, 3843, 2375, 2026, 1995, 3817, 3819, 1901, 2495, 2327, 2366, 2363, 2365, 2369, 2367, 3302, 3274, 3818, 2377, 3360, 3842, 2368, 982, 3358, 3844, 73, 3341], true);
     // finish
     console.log(`Deployed on ${network} with address ${_metabloxV2Instance.address}`);
 
@@ -164,12 +158,12 @@ module.exports = async function (deployer, network, accounts) {
       matic_chainlink: MATIC_CHAINLINK,
       property_tier: _propertyTierInstance.address,
       property_level: _propertyLevelInstance.address,
-      controller: _controllerInstance.address,
+      controller: "skipped",
       memory: _memoriesInstance.address,
       metablox: _metabloxV2Instance.address,
     }
 
-    fs.writeFileSync(`${__dirname}/../data/${moment().tz('Asia/Taipei').format('YYYYMMDD')}_${network}_ny.json`, JSON.stringify(result, null, 2), {
+    fs.writeFileSync(`${__dirname}/../data/${moment().tz('Asia/Taipei').format('YYYYMMDD')}_${network}_miami.json`, JSON.stringify(result, null, 2), {
       encoding: "utf8",
       flag: "wx",
     })

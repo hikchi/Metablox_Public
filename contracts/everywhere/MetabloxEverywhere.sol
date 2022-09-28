@@ -8,11 +8,11 @@ import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/StringsUpgradeable.sol";
 
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
@@ -29,11 +29,11 @@ contract MetabloxEverywhere is
     PausableUpgradeable
 {
     /* libs */
-    using SafeERC20 for ERC20;
-    using SafeMath for uint8;
-    using SafeMath for uint16;
-    using SafeMath for uint256;
-    using Strings for uint256;
+    using SafeERC20Upgradeable for ERC20Upgradeable;
+    using SafeMathUpgradeable for uint8;
+    using SafeMathUpgradeable for uint16;
+    using SafeMathUpgradeable for uint256;
+    using StringsUpgradeable for uint256;
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
     CountersUpgradeable.Counter private _tokenIdCounter;
@@ -78,10 +78,10 @@ contract MetabloxEverywhere is
     // main struct array for Blox
     Blox[] internal bloxRegistry;
     /* chainlink registration table */
-    mapping(address => bool) paymentTokenRegistry;
+    mapping(address => bool) public paymentTokenRegistry;
     // mapping(string => address) priceFeedRegistry;
     // erc20 addr -> oracal address
-    mapping(address => address) priceFeedRegistry;
+    mapping(address => address) public priceFeedRegistry;
     // uris
     string public contractURI;
     string public baseURI;
@@ -102,6 +102,12 @@ contract MetabloxEverywhere is
     // constructor() initializer {}
 
     event NewCityRegistered(string _country, string _state, string _city);
+    event NewBloxAssociated(
+        address indexed _user,
+        uint256 indexed _tokenId,
+        bytes _idetifier,
+        uint256 _bloxNumber
+    );
 
     event NewBloxMinted(
         address indexed _user,
@@ -206,16 +212,20 @@ contract MetabloxEverywhere is
         return abi.encodePacked(_country, _state, _city);
     }
 
-    function getBloxOwnerByTokenId(
-        uint _tokenId
-    ) public view returns (address) {
+    function getBloxOwnerByTokenId(uint256 _tokenId)
+        public
+        view
+        returns (address)
+    {
         TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
         return bloxRegistry[_ttb.bloxIndex].owners[_ttb.bloxNumber];
     }
 
-    function getBloxTotalSupply(
-        bytes memory _identifier
-    ) public view returns (uint) {
+    function getBloxTotalSupply(bytes memory _identifier)
+        public
+        view
+        returns (uint256)
+    {
         return getBlox(_identifier).bloxNumbers.length;
     }
 
@@ -351,6 +361,7 @@ contract MetabloxEverywhere is
                 _bloxNumber >= 1 && _bloxNumber <= _blox.bloxSupply,
                 "invalid blox number"
             );
+            require(_blox.owners[_bloxNumber] == address(0), "blox is owned");
             require(!_blox.cappedBlox[_bloxNumber], "blox is capped");
             require(!_blox.isLandmark[_bloxNumber], "blox is a landmark");
             uint256 _tokenId = _wildTokenIds[i];
@@ -370,6 +381,8 @@ contract MetabloxEverywhere is
             initBloxPropertyLevel(_blox.propertyLevelContract, _bloxNumber);
 
             gracePeriodCheck(_blox, _user);
+
+            emit NewBloxAssociated(_user, _tokenId, _identifier, _bloxNumber);
         }
     }
 
@@ -452,7 +465,7 @@ contract MetabloxEverywhere is
                 "insufficient matic amount to mint"
             );
         } else {
-            ERC20 _erc20 = ERC20(_paymentToken);
+            ERC20Upgradeable _erc20 = ERC20Upgradeable(_paymentToken);
             _erc20.safeTransferFrom(
                 _msgSender(),
                 paymentTokenBeneficiary,
@@ -526,7 +539,7 @@ contract MetabloxEverywhere is
     function releaseGracePeriod(bytes memory _identifier) external onlyOwner {
         Blox storage _blox = getBlox(_identifier);
 
-        (bool _canSub,) = _blox.remainingGP.trySub(1);
+        (bool _canSub, ) = _blox.remainingGP.trySub(1);
         require(_canSub, "GP remaining overflow");
 
         _blox.remainingGP = _blox.remainingGP - 1;
@@ -616,14 +629,12 @@ contract MetabloxEverywhere is
         super.tokenURI(_tokenId);
         TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
         return
-            bytes(baseURI).length > 0 &&
-                _ttb.bloxNumber != 0
+            bytes(baseURI).length > 0 && _ttb.bloxNumber != 0
                 ? string(
                     abi.encodePacked(
                         baseURI,
-                        bloxRegistry[_ttb.bloxIndex]
-                            .uriSuffix,
-                        uint(_ttb.bloxNumber).toString()
+                        bloxRegistry[_ttb.bloxIndex].uriSuffix,
+                        uint256(_ttb.bloxNumber).toString()
                     )
                 )
                 : string(
@@ -710,10 +721,7 @@ contract MetabloxEverywhere is
     function getGracePeriod(bytes memory _identifier)
         public
         view
-        returns (
-            uint256 _currPhase,
-            uint256 _remainingGP
-        )
+        returns (uint256 _currPhase, uint256 _remainingGP)
     {
         Blox storage _blox = bloxRegistry[bloxRegistryIndex[_identifier]];
         _currPhase = _blox.currPhase;
@@ -753,6 +761,14 @@ contract MetabloxEverywhere is
         _blox.enabledGP = _enabledGP;
     }
 
+    function flipPublicMint(bytes memory _identifier, bool _enabledPublicMint)
+        external
+        onlyOwner
+    {
+        Blox storage _blox = getBlox(_identifier);
+        _blox.enabledPublicMint = _enabledPublicMint;
+    }
+
     function _burn(uint256 tokenId)
         internal
         override(ERC721RoyaltyUpgradeable)
@@ -772,9 +788,10 @@ contract MetabloxEverywhere is
         super.transferFrom(from, to, tokenId);
 
         TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
-        Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
-
-        _blox.owners[_ttb.bloxNumber] = to;
+        if (_ttb.bloxNumber != 0) {
+            Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+            _blox.owners[_ttb.bloxNumber] = to;
+        }
     }
 
     function safeTransferFrom(
@@ -793,9 +810,10 @@ contract MetabloxEverywhere is
     ) public virtual override {
         super.safeTransferFrom(from, to, tokenId, data);
 
-        TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
-        Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
-
-        _blox.owners[_ttb.bloxNumber] = to;
+            TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
+        if (_ttb.bloxNumber != 0) {
+            Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+            _blox.owners[_ttb.bloxNumber] = to;
+        }
     }
 }

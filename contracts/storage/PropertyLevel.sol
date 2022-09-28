@@ -10,7 +10,7 @@ contract PropertyLevel is Context, AccessControlEnumerable, ERC3664 {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant ATTACH_ROLE = keccak256("ATTACH_ROLE");
 
-    constructor () ERC3664() {
+    constructor() ERC3664() {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         _setupRole(MINTER_ROLE, _msgSender());
@@ -28,7 +28,10 @@ contract PropertyLevel is Context, AccessControlEnumerable, ERC3664 {
         string memory _symbol,
         string memory _uri
     ) public virtual {
-        require(hasRole(MINTER_ROLE, _msgSender()), "ERC3664Generic: must have minter role to mint");
+        require(
+            hasRole(MINTER_ROLE, _msgSender()),
+            "ERC3664Generic: must have minter role to mint"
+        );
 
         _mint(attrId, _name, _symbol, _uri);
     }
@@ -42,7 +45,10 @@ contract PropertyLevel is Context, AccessControlEnumerable, ERC3664 {
         string[] calldata symbols,
         string[] calldata uris
     ) public virtual {
-        require(hasRole(MINTER_ROLE, _msgSender()), "ERC3664Generic: must have minter role to mint");
+        require(
+            hasRole(MINTER_ROLE, _msgSender()),
+            "ERC3664Generic: must have minter role to mint"
+        );
 
         _mintBatch(attrIds, names, symbols, uris);
     }
@@ -57,7 +63,10 @@ contract PropertyLevel is Context, AccessControlEnumerable, ERC3664 {
         bytes memory text,
         bool isPrimary
     ) public virtual override {
-        require(hasRole(ATTACH_ROLE, _msgSender()), "ERC3664Generic: must have attach role to attach");
+        require(
+            hasRole(ATTACH_ROLE, _msgSender()),
+            "ERC3664Generic: must have attach role to attach"
+        );
 
         super.attach(tokenId, attrId, amount, text, isPrimary);
     }
@@ -71,9 +80,25 @@ contract PropertyLevel is Context, AccessControlEnumerable, ERC3664 {
         uint256[] calldata amounts,
         bytes[] calldata texts
     ) public virtual override {
-        require(hasRole(ATTACH_ROLE, _msgSender()), "ERC3664Generic: must have attach role to attach");
+        require(
+            hasRole(ATTACH_ROLE, _msgSender()),
+            "ERC3664Generic: must have attach role to attach"
+        );
 
         super.batchAttach(tokenId, attrIds, amounts, texts);
+    }
+
+    function burnBatch(
+        uint256 tokenId,
+        uint256[] memory attrIds,
+        uint256[] memory amounts
+    ) public virtual {
+        require(
+            hasRole(MINTER_ROLE, _msgSender()),
+            "ERC3664Generic: must have attach role to burn"
+        );
+
+        _burnBatch(tokenId, attrIds, amounts);
     }
 
     //    /**

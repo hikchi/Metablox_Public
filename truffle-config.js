@@ -33,7 +33,12 @@ module.exports = {
    *
    * $ truffle test --network <network-name>
    */
-  plugins: ["solidity-coverage", "truffle-contract-size"],
+  plugins: ["solidity-coverage", "truffle-contract-size", "truffle-plugin-verify"],
+
+  api_keys: {
+    etherscan: process.env.POLYGON_SCAN_API_KEY,
+    polygonscan: process.env.POLYGON_SCAN_API_KEY,
+  },
 
   networks: {
     // Useful for testing. The `development` name is special - truffle uses it by default
