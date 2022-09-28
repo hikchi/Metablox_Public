@@ -780,6 +780,14 @@ contract MetabloxEverywhere is
         return _tokenIdCounter.current();
     }
 
+    function setCapper(address _capper) public onlyOwner {
+        capper = _capper;
+    } 
+
+    function setMinter(address _minter) public onlyOwner {
+        minter = _minter;
+    } 
+
     function transferFrom(
         address from,
         address to,

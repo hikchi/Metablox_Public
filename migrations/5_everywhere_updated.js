@@ -9,7 +9,7 @@ module.exports = async function (deployer, network, accounts) {
 
   if (network === "mumbai") {
     /* upgrade */
-    let inst = await MetabloxEverywhere.at("0xEDc924d53d822CD446Bcfb31DFd85f12707d9D0E")
+    let inst = await MetabloxEverywhere.at("0xcd7f6902e5918F830163d02209D67B4f4ecE22DA")
     console.log(inst.address, deployer)
     let newInst = await upgradeProxy(inst.address, MetabloxEverywhere, { deployer })
     console.log(newInst.address, deployer)
