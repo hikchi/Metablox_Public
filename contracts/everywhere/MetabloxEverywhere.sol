@@ -128,6 +128,11 @@ contract MetabloxEverywhere is
         uint256 _timestamp
     );
 
+    enum MintFlag {
+        CUSTODIAL,
+        PUBLIC
+    }
+
     function initialize(
         address _propertyTierContractAddress,
         address[] memory _tokenRelatedAddresses,
@@ -212,13 +217,15 @@ contract MetabloxEverywhere is
         return abi.encodePacked(_country, _state, _city);
     }
 
-    function getBloxOwnerByTokenId(uint256 _tokenId)
+    function getBloxByTokenId(uint256 _tokenId)
         public
         view
-        returns (address)
+        returns (address _bloxOwner, uint _bloxIndex, uint _bloxNumber)
     {
         TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
-        return bloxRegistry[_ttb.bloxIndex].owners[_ttb.bloxNumber];
+        _bloxOwner = bloxRegistry[_ttb.bloxIndex].owners[_ttb.bloxNumber];
+        _bloxIndex = _ttb.bloxIndex;
+        _bloxNumber = _ttb.bloxNumber;
     }
 
     function getBloxTotalSupply(bytes memory _identifier)
@@ -316,7 +323,7 @@ contract MetabloxEverywhere is
         uint256[] memory _wildTokenIds,
         uint16[] memory _bloxNumbers
     ) external onlyMinter whenNotPaused {
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.CUSTODIAL);
     }
 
     function wildMint(address _user, uint256 _mintAmount)
@@ -338,7 +345,8 @@ contract MetabloxEverywhere is
     function associateTokenToBlox(
         bytes memory _identifier,
         uint256[] memory _wildTokenIds,
-        uint16[] memory _bloxNumbers
+        uint16[] memory _bloxNumbers,
+        MintFlag _FLAG
     ) private {
         require(
             _wildTokenIds.length > 0 && _wildTokenIds.length <= 20,
@@ -362,7 +370,9 @@ contract MetabloxEverywhere is
                 "invalid blox number"
             );
             require(_blox.owners[_bloxNumber] == address(0), "blox is owned");
-            require(!_blox.cappedBlox[_bloxNumber], "blox is capped");
+            if (_FLAG == MintFlag.PUBLIC) {
+                require(!_blox.cappedBlox[_bloxNumber], "blox is capped");
+            }
             require(!_blox.isLandmark[_bloxNumber], "blox is a landmark");
             uint256 _tokenId = _wildTokenIds[i];
             address _user = ownerOf(_tokenId);
@@ -407,7 +417,7 @@ contract MetabloxEverywhere is
         );
         // mint execution
         uint256[] memory _wildTokenIds = wildMint(_user, _bloxNumbers.length);
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.CUSTODIAL);
     }
 
     // reservation batch mint
@@ -477,7 +487,7 @@ contract MetabloxEverywhere is
             _msgSender(),
             _bloxNumbers.length
         );
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers);
+        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.PUBLIC);
     }
 
     /**
