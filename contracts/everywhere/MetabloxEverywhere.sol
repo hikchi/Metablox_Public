@@ -228,6 +228,14 @@ contract MetabloxEverywhere is
         _bloxNumber = _ttb.bloxNumber;
     }
 
+    function getCity(uint256 _bloxIndex)
+        public
+        view
+        returns (string memory _city)
+    {
+        _city = string(abi.encodePacked(bloxRegistry[_bloxIndex].identifier));
+    }
+
     function getBloxTotalSupply(bytes memory _identifier)
         public
         view

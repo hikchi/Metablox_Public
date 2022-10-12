@@ -179,13 +179,17 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 				);
 			})
 
-			it("should not be able to do custodial mint with capped blox", async function () {
+			it("should not be able to do public mint with capped blox", async function () {
+				const MATIC_100 = "42958629550983520000" // 42.958 MATIC at price $2.327821
 				await truffleAssert.reverts(
-					this.Metablox.custodialBatchMint(
+					this.Metablox.publicBatchMint(
 						this.identifier,
-						this.dummyReceiver,
-						[1], // capped Blox number
-						{ from: this.minter },
+						[1], // Blox number
+						[this.propertyTier], // property tier: 1
+						this.WMATIC.address, // buy with: USDT
+						[MATIC_100], // MATIC token amount: 42.958 MATIC
+						"100", // tolerance: 1%
+						{ from: this.owner, value: MATIC_100 },
 					),
 					"blox is capped",
 					"should not be able to publicly mint reserved blox",
@@ -394,7 +398,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		})
 
 		context("with custodial mint", async function () {
-			context("happy path", async function () {
+			context.only("happy path", async function () {
 				it("custodial mint", async function () {
 					tx = await this.Metablox.custodialBatchMint(
 						this.identifier,
@@ -406,8 +410,9 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 
 				it("should have correct NFT / Blox owner and supply", async function () {
 					assert.equal(await this.Metablox.ownerOf(0), this.dummyReceiver, "unmatched NFT owner");
-					assert.equal(await this.Metablox.getBloxOwnerByTokenId(0), this.dummyReceiver, "unmatched Blox owner");
+					assert.equal((await this.Metablox.getBloxByTokenId(0))[0], this.dummyReceiver, "unmatched Blox owner");
 					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 1, "unmatched Blox total supply");
+					assert.equal((await this.Metablox.getCity(0)), "USWASeattle", "unmatched Blox owner");
 				});
 
 				it("should have correct token uri", async function () {
@@ -489,7 +494,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					})
 					it("should successfully transfer a wild token", async function () {
 						assert.equal(await this.Metablox.ownerOf(1), this.dummyReceiver, "unmatched NFT owner");
-						assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.dummyReceiver, "unmatched Blox owner");
+						assert.equal((await this.Metablox.getBloxByTokenId(1))[0], this.dummyReceiver, "unmatched Blox owner");
 					});
 					after(async function () {
 						await truffleAssert.passes(
@@ -498,7 +503,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 						);
 
 						assert.equal(await this.Metablox.ownerOf(1), this.owner, "unmatched NFT owner");
-						assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.owner, "unmatched Blox owner");
+						assert.equal((await this.Metablox.getBloxByTokenId(1))[0], this.owner, "unmatched Blox owner");
 					})
 				})
 
@@ -512,7 +517,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 
 				it("should have correct NFT / Blox owner and supply", async function () {
 					assert.equal(await this.Metablox.ownerOf(1), this.owner, "unmatched NFT owner");
-					assert.equal(await this.Metablox.getBloxOwnerByTokenId(1), this.owner, "unmatched Blox owner");
+					assert.equal((await this.Metablox.getBloxByTokenId(1))[0], this.owner, "unmatched Blox owner");
 					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 2, "unmatched Blox supply");
 				});
 
@@ -634,7 +639,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					})
 					it("should successfully transfer a wild token", async function () {
 						assert.equal(await this.Metablox.ownerOf(2), this.owner, "unmatched NFT owner");
-						assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
+						assert.equal((await this.Metablox.getBloxByTokenId(2))[0], "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
 					});
 					after(async function () {
 						await truffleAssert.passes(
@@ -643,7 +648,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 						);
 
 						assert.equal(await this.Metablox.ownerOf(2), this.dummyReceiver, "unmatched NFT owner");
-						assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
+						assert.equal((await this.Metablox.getBloxByTokenId(2))[0], "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
 					})
 				})
 
@@ -652,21 +657,21 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 				});
 
 				context("token association", async function () {
-				it("associate to blox", async function () {
-					await this.Metablox.authorizedAssociation(
-						this.identifier,
-						[2], // token id
-						[3], // blox number
-						{ from: this.minter },
-					)
-				})
+					it("associate to blox", async function () {
+						await this.Metablox.authorizedAssociation(
+							this.identifier,
+							[2], // token id
+							[3], // blox number
+							{ from: this.minter },
+						)
+					})
 
-				it("should have correct NFT / Blox owner and supply", async function () {
-					assert.equal(await this.Metablox.ownerOf(2), this.dummyReceiver, "unmatched NFT owner");
-					assert.equal(await this.Metablox.getBloxOwnerByTokenId(2), this.dummyReceiver, "unmatched NFT owner");
-					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 3, "unmatched Blox supply");
-				});
-			})
+					it("should have correct NFT / Blox owner and supply", async function () {
+						assert.equal(await this.Metablox.ownerOf(2), this.dummyReceiver, "unmatched NFT owner");
+						assert.equal((await this.Metablox.getBloxByTokenId(2))[0], this.dummyReceiver, "unmatched NFT owner");
+						assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 3, "unmatched Blox supply");
+					});
+				})
 
 			})
 
@@ -725,7 +730,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 
 			it("should have correct NFT / Blox owner and supply", async function () {
 				assert.equal(await this.Metablox.ownerOf(3), this.owner, "unmatched NFT owner");
-				assert.equal(await this.Metablox.getBloxOwnerByTokenId(3), this.owner, "unmatched Blox owner");
+				assert.equal((await this.Metablox.getBloxByTokenId(3))[0], this.owner, "unmatched Blox owner");
 				assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 4, "unmatched Blox supply");
 			});
 
@@ -777,9 +782,9 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 
 		it("should have correct NFT / Blox owner and supply", async function () {
 			assert.equal(await this.Metablox.ownerOf(4), this.owner, "unmatched NFT owner");
-			assert.equal(await this.Metablox.getBloxOwnerByTokenId(4), this.owner, "unmatched Blox owner");
+			assert.equal((await this.Metablox.getBloxByTokenId(4))[0], this.owner, "unmatched Blox owner");
 			assert.equal(await this.Metablox.ownerOf(5), this.owner, "unmatched NFT owner");
-			assert.equal(await this.Metablox.getBloxOwnerByTokenId(5), this.owner, "unmatched Blox owner");
+			assert.equal((await this.Metablox.getBloxByTokenId(5))[0], this.owner, "unmatched Blox owner");
 			assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 6, "unmatched Blox supply");
 		});
 
@@ -836,7 +841,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		// test with public mint
 		context("without releasing grace period", async function () {
 			before("MATIC balance check", async function () {
-				
+
 				maticBalance = await web3.eth.getBalance(this.owner)
 				contractMaticBalance = await web3.eth.getBalance(this.Metablox.address)
 				assert.notEqual(maticBalance, 0, "unmatched MATIC balance of NFT owner");
