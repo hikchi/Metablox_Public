@@ -62,7 +62,7 @@ module.exports = {
       disableConfirmations: true,
     },
     polygon: {
-      provider: () => new HDWalletProvider(mnemonic_mainnet, `wss://polygon-mainnet.g.alchemy.com/v2/EHICS-ndv4EYoqP_eQ4-_5bEoY0ZeJnD`),
+      provider: () => new HDWalletProvider(mnemonic_mainnet, `wss://polygon-mainnet.g.alchemy.com/v2/8d9rQt5gCbHXxXtOxt-BPVNX4dCmqySD`),
       network_id: 137,
       confirmations: 2,
       timeoutBlocks: 200,

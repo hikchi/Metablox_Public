@@ -70,6 +70,8 @@ module.exports = async function (deployer, network, accounts) {
   // deploy metablox v2
   const _mbInst = await deployProxy(MetabloxEverywhere, [
     _propertyTierInst.address,
+    _propertyLevelInst.address,
+    _memoriesInst.address,
     [USDT_ADDRESS, WMATIC_ADDRESS, WETH_ADDRESS, MATIC_CHAINLINK, WETH_CHAINLINK],
     [accounts[1], accounts[2], accounts[3]],
   ], { deployer });

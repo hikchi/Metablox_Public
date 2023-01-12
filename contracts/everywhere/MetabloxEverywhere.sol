@@ -40,7 +40,7 @@ contract MetabloxEverywhere is
 
     /* Blox structure */
     struct Blox {
-        bytes identifier;
+        bool registered;
         /* metadata */
         uint16 bloxSupply;
         string uriSuffix;
@@ -54,9 +54,6 @@ contract MetabloxEverywhere is
         uint8 maxPublicMint;
         uint8 maxCustodialMint;
         // authorizies
-        // some contracts for all the functinoalities
-        address propertyLevelContract;
-        address memoryContract;
         // consider using universal one
         // some members for GP.
         bool enabledGP;
@@ -67,19 +64,16 @@ contract MetabloxEverywhere is
     }
 
     struct TokenToBlox {
-        uint256 bloxIndex;
+        bytes bloxIdentifier;
         uint16 bloxNumber;
     }
     /* Blox registry */
-    // bytes(country_state_city) -> blox index
-    mapping(bytes => uint256) bloxRegistryIndex;
-    // token id -> blox index -> blox number
+    // bytes(country_state_city) -> blox
+    mapping(bytes => Blox) bloxRegistry;
+    // token id -> blox identifier -> blox number
     mapping(uint256 => TokenToBlox) tokenToBloxRegistry;
-    // main struct array for Blox
-    Blox[] internal bloxRegistry;
     /* chainlink registration table */
     mapping(address => bool) public paymentTokenRegistry;
-    // mapping(string => address) priceFeedRegistry;
     // erc20 addr -> oracal address
     mapping(address => address) public priceFeedRegistry;
     // uris
@@ -94,6 +88,8 @@ contract MetabloxEverywhere is
     uint256 constant TOLERANCE_PADDING = 1e22; // 100 matic
     /* public params */
     address public propertyTierContractAddress;
+    address public propertyLevelContractAddress;
+    address public memoryContractAddress;
 
     string private constant DEFAULT_URI_SUFFIX = "wild/";
     address private WMATIC_ADDRESS;
@@ -135,6 +131,8 @@ contract MetabloxEverywhere is
 
     function initialize(
         address _propertyTierContractAddress,
+        address _propertyLevelContractAddress,
+        address _memoryContractAddress,
         address[] memory _tokenRelatedAddresses,
         address[] memory _authorities
     ) public initializer {
@@ -146,6 +144,8 @@ contract MetabloxEverywhere is
         // initialize Metablox Everwhere contract
         __Blox_init(
             _propertyTierContractAddress,
+            _propertyLevelContractAddress,
+            _memoryContractAddress,
             _tokenRelatedAddresses,
             _authorities
         );
@@ -153,10 +153,14 @@ contract MetabloxEverywhere is
 
     function __Blox_init(
         address _propertyTierContractAddress,
+        address _propertyLevelContractAddress,
+        address _memoryContractAddress,
         address[] memory _tokenRelatedAddresses,
         address[] memory _authorities
     ) internal {
         propertyTierContractAddress = _propertyTierContractAddress;
+        propertyLevelContractAddress = _propertyLevelContractAddress;
+        memoryContractAddress = _memoryContractAddress;
 
         address _usdt = _tokenRelatedAddresses[0];
         address _wmatic = _tokenRelatedAddresses[1];
@@ -188,8 +192,7 @@ contract MetabloxEverywhere is
         view
         returns (Blox storage)
     {
-        uint256 _i = bloxRegistryIndex[_identifier];
-        return bloxRegistry[_i];
+        return bloxRegistry[_identifier];
     }
 
     function register(
@@ -198,13 +201,11 @@ contract MetabloxEverywhere is
         string memory _city,
         string memory _uriSuffix
     ) external onlyOwner {
-        // add blox into index mapping
+        // add blox into mapping
         bytes memory _identifier = getIdentifier(_country, _state, _city);
-        require(bloxRegistryIndex[_identifier] == 0, "Blox registered");
-        bloxRegistryIndex[_identifier] = bloxRegistry.length;
-        bloxRegistry.push();
-        // push into Blox array
-        initBlox(bloxRegistryIndex[_identifier], _identifier, _uriSuffix);
+        require(!bloxRegistry[_identifier].registered, "Blox registered");
+        // init blox data
+        initBlox(_identifier, _uriSuffix);
         // fire event
         emit NewCityRegistered(_country, _state, _city);
     }
@@ -220,20 +221,24 @@ contract MetabloxEverywhere is
     function getBloxByTokenId(uint256 _tokenId)
         public
         view
-        returns (address _bloxOwner, uint _bloxIndex, uint _bloxNumber)
+        returns (
+            address _bloxOwner,
+            bytes memory _bloxIdentifier,
+            uint256 _bloxNumber
+        )
     {
         TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
-        _bloxOwner = bloxRegistry[_ttb.bloxIndex].owners[_ttb.bloxNumber];
-        _bloxIndex = _ttb.bloxIndex;
+        _bloxOwner = bloxRegistry[_ttb.bloxIdentifier].owners[_ttb.bloxNumber];
+        _bloxIdentifier = _ttb.bloxIdentifier;
         _bloxNumber = _ttb.bloxNumber;
     }
 
-    function getCity(uint256 _bloxIndex)
+    function getCity(bytes memory _identifier)
         public
-        view
+        pure
         returns (string memory _city)
     {
-        _city = string(abi.encodePacked(bloxRegistry[_bloxIndex].identifier));
+        _city = string(_identifier);
     }
 
     function getBloxTotalSupply(bytes memory _identifier)
@@ -244,14 +249,12 @@ contract MetabloxEverywhere is
         return getBlox(_identifier).bloxNumbers.length;
     }
 
-    function initBlox(
-        uint256 _index,
-        bytes memory _identifier,
-        string memory _uriSuffix
-    ) private {
+    function initBlox(bytes memory _identifier, string memory _uriSuffix)
+        private
+    {
         // init a blank Blox
-        Blox storage _blox = bloxRegistry[_index];
-        _blox.identifier = _identifier;
+        Blox storage _blox = bloxRegistry[_identifier];
+        _blox.registered = true;
         // set defaulte mint amount
         _blox.maxCustodialMint = 20;
         _blox.maxPublicMint = 5;
@@ -292,10 +295,7 @@ contract MetabloxEverywhere is
         return _blox.bloxSupply;
     }
 
-    function initBloxPropertyLevel(
-        address _propertyLevelContract,
-        uint256 _bloxNumber
-    ) private {
+    function initBloxPropertyLevel(uint256 _tokenId) private {
         uint256[] memory _attrIds = new uint256[](4);
         _attrIds[0] = 1;
         _attrIds[1] = 2;
@@ -310,8 +310,8 @@ contract MetabloxEverywhere is
 
         bytes[] memory _texts = new bytes[](4);
 
-        PropertyLevel(_propertyLevelContract).batchAttach(
-            _bloxNumber,
+        PropertyLevel(propertyLevelContractAddress).batchAttach(
+            _tokenId,
             _attrIds,
             _attrAmounts,
             _texts
@@ -331,7 +331,12 @@ contract MetabloxEverywhere is
         uint256[] memory _wildTokenIds,
         uint16[] memory _bloxNumbers
     ) external onlyMinter whenNotPaused {
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.CUSTODIAL);
+        associateTokenToBlox(
+            _identifier,
+            _wildTokenIds,
+            _bloxNumbers,
+            MintFlag.CUSTODIAL
+        );
     }
 
     function wildMint(address _user, uint256 _mintAmount)
@@ -386,7 +391,7 @@ contract MetabloxEverywhere is
             address _user = ownerOf(_tokenId);
 
             tokenToBloxRegistry[_tokenId] = TokenToBlox({
-                bloxIndex: bloxRegistryIndex[_identifier],
+                bloxIdentifier: _identifier,
                 bloxNumber: _bloxNumber
             });
 
@@ -396,7 +401,7 @@ contract MetabloxEverywhere is
             if (_blox.bloxNumbers.length == _blox.bloxSupply) {
                 _blox.allBloxSold = true;
             }
-            initBloxPropertyLevel(_blox.propertyLevelContract, _bloxNumber);
+            initBloxPropertyLevel(_wildTokenIds[i]);
 
             gracePeriodCheck(_blox, _user);
 
@@ -411,6 +416,7 @@ contract MetabloxEverywhere is
         uint16[] memory _bloxNumbers
     ) external onlyMinter whenNotPaused {
         Blox storage _blox = getBlox(_identifier);
+        require(_blox.registered, "not a registered blox");
         // check blox length availability
         require(
             _bloxNumbers.length <= _blox.maxCustodialMint &&
@@ -425,7 +431,12 @@ contract MetabloxEverywhere is
         );
         // mint execution
         uint256[] memory _wildTokenIds = wildMint(_user, _bloxNumbers.length);
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.CUSTODIAL);
+        associateTokenToBlox(
+            _identifier,
+            _wildTokenIds,
+            _bloxNumbers,
+            MintFlag.CUSTODIAL
+        );
     }
 
     // reservation batch mint
@@ -495,7 +506,12 @@ contract MetabloxEverywhere is
             _msgSender(),
             _bloxNumbers.length
         );
-        associateTokenToBlox(_identifier, _wildTokenIds, _bloxNumbers, MintFlag.PUBLIC);
+        associateTokenToBlox(
+            _identifier,
+            _wildTokenIds,
+            _bloxNumbers,
+            MintFlag.PUBLIC
+        );
     }
 
     /**
@@ -651,7 +667,7 @@ contract MetabloxEverywhere is
                 ? string(
                     abi.encodePacked(
                         baseURI,
-                        bloxRegistry[_ttb.bloxIndex].uriSuffix,
+                        bloxRegistry[_ttb.bloxIdentifier].uriSuffix,
                         uint256(_ttb.bloxNumber).toString()
                     )
                 )
@@ -659,7 +675,7 @@ contract MetabloxEverywhere is
                     abi.encodePacked(
                         baseURI,
                         DEFAULT_URI_SUFFIX,
-                     _tokenId.toString()
+                        _tokenId.toString()
                     )
                 );
     }
@@ -730,7 +746,7 @@ contract MetabloxEverywhere is
             uint256 _maxCustodialMint
         )
     {
-        Blox storage _blox = bloxRegistry[bloxRegistryIndex[_identifier]];
+        Blox storage _blox = bloxRegistry[_identifier];
         _allBloxSold = _blox.allBloxSold;
         _maxPublicMint = _blox.maxPublicMint;
         _maxCustodialMint = _blox.maxCustodialMint;
@@ -741,7 +757,7 @@ contract MetabloxEverywhere is
         view
         returns (uint256 _currPhase, uint256 _remainingGP)
     {
-        Blox storage _blox = bloxRegistry[bloxRegistryIndex[_identifier]];
+        Blox storage _blox = bloxRegistry[_identifier];
         _currPhase = _blox.currPhase;
         _remainingGP = _blox.remainingGP;
     }
@@ -755,20 +771,12 @@ contract MetabloxEverywhere is
         baseURI = _newBaseURI;
     }
 
-    function setPropertyLevelContract(bytes memory _identifier, address _new)
-        external
-        onlyOwner
-    {
-        Blox storage _blox = getBlox(_identifier);
-        _blox.propertyLevelContract = _new;
+    function setPropertyLevelContract(address _new) external onlyOwner {
+        propertyLevelContractAddress = _new;
     }
 
-    function setMemoryContract(bytes memory _identifier, address _new)
-        external
-        onlyOwner
-    {
-        Blox storage _blox = getBlox(_identifier);
-        _blox.memoryContract = _new;
+    function setMemoryContract(address _new) external onlyOwner {
+        memoryContractAddress = _new;
     }
 
     function flipGracePeriod(bytes memory _identifier, bool _enabledGP)
@@ -800,11 +808,11 @@ contract MetabloxEverywhere is
 
     function setCapper(address _capper) public onlyOwner {
         capper = _capper;
-    } 
+    }
 
     function setMinter(address _minter) public onlyOwner {
         minter = _minter;
-    } 
+    }
 
     function transferFrom(
         address from,
@@ -815,7 +823,7 @@ contract MetabloxEverywhere is
 
         TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
         if (_ttb.bloxNumber != 0) {
-            Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+            Blox storage _blox = bloxRegistry[_ttb.bloxIdentifier];
             _blox.owners[_ttb.bloxNumber] = to;
         }
     }
@@ -836,9 +844,9 @@ contract MetabloxEverywhere is
     ) public virtual override {
         super.safeTransferFrom(from, to, tokenId, data);
 
-            TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
+        TokenToBlox memory _ttb = tokenToBloxRegistry[tokenId];
         if (_ttb.bloxNumber != 0) {
-            Blox storage _blox = bloxRegistry[_ttb.bloxIndex];
+            Blox storage _blox = bloxRegistry[_ttb.bloxIdentifier];
             _blox.owners[_ttb.bloxNumber] = to;
         }
     }

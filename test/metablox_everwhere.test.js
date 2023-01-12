@@ -51,6 +51,8 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		this.propertyTierContract = await PropertyTier.new();
 		// Deploy a new property level contraxt
 		this.propertyLevelContract = await PropertyLevel.new();
+		// Deploy a new memory contraxt
+		this.memoryContract = await MetabloxMemories.new();
 		await this.propertyLevelContract.mintBatch(
 			[1, 2, 3, 4],
 			["level", "memory marks", "memory slot", "metarent storage"],
@@ -68,12 +70,16 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		this.Metablox = await Metablox.new();
 		await this.Metablox.initialize(
 			this.propertyTierContract.address,
+			this.propertyLevelContract.address,
+			this.memoryContract.address,
 			[this.USDT.address, this.WMATIC.address, this.WETH.address, this.chainlinkMatic.address, this.chainlinkWeth.address],
 			[this.minter, this.capper, this.paymentTokenBeneficiary],
 		);
 		// this.Metablox = await deployProxy(Metablox, [
 		// 	this.propertyTierContract.address,
-		// 	[this.USDT.address, this.WETH.address, this.WMATIC.address, this.chainlinkWeth.address, this.chainlinkMatic.address],
+		// 	this.propertyLevelContract.address,
+		// 	this.memoryContract.address,
+		// 	[this.USDT.address, this.WMATIC.address, this.WETH.address, this.chainlinkMatic.address, this.chainlinkWeth.address],
 		// 	[this.minter, this.capper, this.paymentTokenBeneficiary],
 		// ]);
 		// set base uri
@@ -99,12 +105,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		await this.Metablox.setLandmarkNumber(
 			this.identifier,
 			Array.from({ length: 10 }, (_, i) => this.TEST_BLOX_SUPPLY - 1 - i), true
-		);
-
-		await this.Metablox.setPropertyLevelContract(
-			this.identifier,
-			this.propertyLevelContract.address,
-			{ from: this.owner }
 		);
 
 		// Set up for property level
@@ -289,7 +289,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 			it("shouldn't be able to set property level contract by non_owner address", async function () {
 				await truffleAssert.reverts(
 					this.Metablox.setPropertyLevelContract(
-						this.identifier,
 						this.propertyLevelContract.address,
 						{ from: this.dummyReceiver }
 					),
@@ -301,7 +300,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 			it("shouldn't be able to set memory contract by non_owner address", async function () {
 				await truffleAssert.reverts(
 					this.Metablox.setMemoryContract(
-						this.identifier,
 						this.propertyLevelContract.address,
 						{ from: this.dummyReceiver }
 					),
@@ -398,7 +396,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		})
 
 		context("with custodial mint", async function () {
-			context.only("happy path", async function () {
+			context("happy path", async function () {
 				it("custodial mint", async function () {
 					tx = await this.Metablox.custodialBatchMint(
 						this.identifier,
@@ -412,7 +410,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					assert.equal(await this.Metablox.ownerOf(0), this.dummyReceiver, "unmatched NFT owner");
 					assert.equal((await this.Metablox.getBloxByTokenId(0))[0], this.dummyReceiver, "unmatched Blox owner");
 					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 1, "unmatched Blox total supply");
-					assert.equal((await this.Metablox.getCity(0)), "USWASeattle", "unmatched Blox owner");
 				});
 
 				it("should have correct token uri", async function () {
@@ -954,16 +951,15 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 
 	context("property level", async function () {
 		it("should have correct balance of attr - blox 1", async function () {
-			for (i = 1; i <= 12; i++) {
+			for (i = 0; i < 3; i++) {
 				const _level = await this.propertyLevelContract.balanceOf(i, 1);
 				const _marks = await this.propertyLevelContract.balanceOf(i, 2);
 				const _slot = await this.propertyLevelContract.balanceOf(i, 3);
 				const _mrStorage = await this.propertyLevelContract.balanceOf(i, 4);
-
 				assert.equal(_level, 1, "unmatched level");
-				assert.equal(_marks, 0, "unmatched level");
-				assert.equal(_slot, 1, "unmatched level");
-				assert.equal(_mrStorage, 300, "unmatched level");
+				assert.equal(_marks, 0, "unmatched marks");
+				assert.equal(_slot, 1, "unmatched slot");
+				assert.equal(_mrStorage, 300, "unmatched metarent storage");
 			}
 		});
 	})
