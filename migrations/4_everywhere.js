@@ -1,4 +1,4 @@
-const { deployProxy, upgradeProxy } = require('@openzeppelin/truffle-upgrades');
+const { deployProxy } = require('@openzeppelin/truffle-upgrades');
 const MetabloxEverywhere = artifacts.require("MetabloxEverywhere");
 const PropertyTier = artifacts.require("PropertyTier");
 const PropertyLevel = artifacts.require("PropertyLevel");
@@ -53,35 +53,43 @@ module.exports = async function (deployer, network, accounts) {
   // const _propertyTierInst = await PropertyTier.at("0xbdC34F5bd6f429Eaef982d344E299d4d1b6970e2");
   // const _propertyLevelInst = await PropertyLevel.at("0xbfd85868E83866D8EAAe978E98Bd641354256869");
   // const _memoriesInst = await MetabloxMemories.at("0xdA2b9098bb0a5482155725f6ccd6Ea182f54f6aC");
-  await deployer.deploy(PropertyTier)
-  await deployer.deploy(PropertyLevel)
-  await deployer.deploy(MetabloxMemories)
-  const _propertyTierInst = await PropertyTier.deployed();
-  const _propertyLevelInst = await PropertyLevel.deployed();
-  const _memoriesInst = await MetabloxMemories.deployed();
+  // await deployer.deploy(PropertyTier)
+  // await new Promise((resolve) => {
+  //   setTimeout(resolve, 5000);
+  // });
+  // await deployer.deploy(PropertyLevel)
+  // await new Promise((resolve) => {
+  //   setTimeout(resolve, 5000);
+  // });
+  // await deployer.deploy(MetabloxMemories)
+  // await new Promise((resolve) => {
+  //   setTimeout(resolve, 5000);
+  // });
+  const _propertyTierInst = await PropertyTier.at('0xFC2D164aA919FCB9A3C7a8753d6a51Ab992678a7');
+  const _propertyLevelInst = await PropertyLevel.at('0xc3bdE260E911da3325D91e2b6F4737858ee07420');
+  const _memoriesInst = await MetabloxMemories.at('0x12492EEEe0745f17231fFFE6d8cBEa3f051fe20B');
   console.log(`Deployed property tier on ${network} with address ${_propertyTierInst.address}`);
   console.log(`Deployed property level on ${network} with address ${_propertyLevelInst.address}`);
   console.log(`Deployed memories on ${network} with address ${_memoriesInst.address}`);
   // start deploy everywhere contract
-  console.log('Sleep 10 sec to deploy metablox everywhere..')
   await new Promise((resolve) => {
-    setTimeout(resolve, 10000);
+    setTimeout(resolve, 5000);
   });
   // deploy metablox v2
-  const _mbInst = await deployProxy(MetabloxEverywhere, [
-    _propertyTierInst.address,
-    _propertyLevelInst.address,
-    _memoriesInst.address,
-    [USDT_ADDRESS, WMATIC_ADDRESS, WETH_ADDRESS, MATIC_CHAINLINK, WETH_CHAINLINK],
-    [accounts[1], accounts[2], accounts[3]],
-  ], { deployer });
+  // const _mbInst = await deployProxy(MetabloxEverywhere, [
+  //   _propertyTierInst.address,
+  //   _propertyLevelInst.address,
+  //   _memoriesInst.address,
+  //   [USDT_ADDRESS, WMATIC_ADDRESS, WETH_ADDRESS, MATIC_CHAINLINK, WETH_CHAINLINK],
+  //   [accounts[1], accounts[2], accounts[3]],
+  // ], { deployer });
+  const _mbInst = await MetabloxEverywhere.at("0x49DbD1e788c22a641Ea8A7d940852fCb1b7D808b");
   // set blox contract and memory
   // await _memoriesInst.setBloxContract(_mbInst.address);
 
   // Set up for property level
-  console.log('Sleep 3 sec to setup property level...')
   await new Promise((resolve) => {
-    setTimeout(resolve, 3);
+    setTimeout(resolve, 5000);
   });
   const ATTACH_ROLE = await _propertyLevelInst.ATTACH_ROLE()
   await _propertyLevelInst.grantRole(ATTACH_ROLE, _mbInst.address)
@@ -93,9 +101,9 @@ module.exports = async function (deployer, network, accounts) {
     ["level", "memory marks", "memory slot", "metarent storage"],
   );
 
-  console.log('Sleep 3 sec to setup everywhere instance...')
+  console.log('Sleep 5 sec to setup everywhere instance...')
   await new Promise((resolve) => {
-    setTimeout(resolve, 3);
+    setTimeout(resolve, 5000);
   });
   await _mbInst.setBaseURI(BASE_URI);
   await _mbInst.setContractURI(CONTRACT_URI);

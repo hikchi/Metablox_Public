@@ -7,7 +7,7 @@ module.exports = async function (deployer, network, accounts) {
     return;
   }
 
-  const addr = network === "mumbai" ? "0xcd7f6902e5918F830163d02209D67B4f4ecE22DA" : "0x225062C239719061C3a7104F9AE0524A76ED3eDF";
+  const addr = network === "mumbai" ? "0x49DbD1e788c22a641Ea8A7d940852fCb1b7D808b" : "0x225062C239719061C3a7104F9AE0524A76ED3eDF";
   /* upgrade */
   let inst = await MetabloxEverywhere.at(addr)
   console.log(inst.address)

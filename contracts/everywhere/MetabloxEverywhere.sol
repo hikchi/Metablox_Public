@@ -91,8 +91,10 @@ contract MetabloxEverywhere is
     address public propertyLevelContractAddress;
     address public memoryContractAddress;
 
-    string private constant DEFAULT_URI_SUFFIX = "wild/";
+    string private constant DEFAULT_URI_SUFFIX = "global/";
     address private WMATIC_ADDRESS;
+
+    mapping(uint256 => uint16) public tokenToBloxNumber;
     /* private params */
     /// @custom:oz-upgrades-unsafe-allow constructor
     // constructor() initializer {}
@@ -187,11 +189,9 @@ contract MetabloxEverywhere is
         _;
     }
 
-    function getBlox(bytes memory _identifier)
-        private
-        view
-        returns (Blox storage)
-    {
+    function getBlox(
+        bytes memory _identifier
+    ) private view returns (Blox storage) {
         return bloxRegistry[_identifier];
     }
 
@@ -218,7 +218,9 @@ contract MetabloxEverywhere is
         return abi.encodePacked(_country, _state, _city);
     }
 
-    function getBloxByTokenId(uint256 _tokenId)
+    function getBloxByTokenId(
+        uint256 _tokenId
+    )
         public
         view
         returns (
@@ -233,25 +235,22 @@ contract MetabloxEverywhere is
         _bloxNumber = _ttb.bloxNumber;
     }
 
-    function getCity(bytes memory _identifier)
-        public
-        pure
-        returns (string memory _city)
-    {
+    function getCity(
+        bytes memory _identifier
+    ) public pure returns (string memory _city) {
         _city = string(_identifier);
     }
 
-    function getBloxTotalSupply(bytes memory _identifier)
-        public
-        view
-        returns (uint256)
-    {
+    function getBloxTotalSupply(
+        bytes memory _identifier
+    ) public view returns (uint256) {
         return getBlox(_identifier).bloxNumbers.length;
     }
 
-    function initBlox(bytes memory _identifier, string memory _uriSuffix)
-        private
-    {
+    function initBlox(
+        bytes memory _identifier,
+        string memory _uriSuffix
+    ) private {
         // init a blank Blox
         Blox storage _blox = bloxRegistry[_identifier];
         _blox.registered = true;
@@ -278,19 +277,17 @@ contract MetabloxEverywhere is
         }
     }
 
-    function setBloxSupply(bytes memory _identifier, uint16 _bloxSupply)
-        external
-        onlyOwner
-    {
+    function setBloxSupply(
+        bytes memory _identifier,
+        uint16 _bloxSupply
+    ) external onlyOwner {
         Blox storage _blox = getBlox(_identifier);
         _blox.bloxSupply = _bloxSupply;
     }
 
-    function getBloxSupply(bytes memory _identifier)
-        external
-        view
-        returns (uint16)
-    {
+    function getBloxSupply(
+        bytes memory _identifier
+    ) external view returns (uint16) {
         Blox storage _blox = getBlox(_identifier);
         return _blox.bloxSupply;
     }
@@ -318,38 +315,51 @@ contract MetabloxEverywhere is
         );
     }
 
-    function authorizedWildMint(address _user, uint256 _mintAmount)
-        external
-        onlyMinter
-        whenNotPaused
-    {
-        wildMint(_user, _mintAmount);
+    function authorizedGlobalMint(
+        address _user,
+        uint256 _mintAmount,
+        uint16[] calldata _blockNumbers
+    ) external onlyMinter whenNotPaused {
+        globalMint(_user, _mintAmount, _blockNumbers);
     }
 
     function authorizedAssociation(
         bytes memory _identifier,
-        uint256[] memory _wildTokenIds,
+        uint256[] memory _globalTokenIds,
         uint16[] memory _bloxNumbers
     ) external onlyMinter whenNotPaused {
         associateTokenToBlox(
             _identifier,
-            _wildTokenIds,
+            _globalTokenIds,
             _bloxNumbers,
             MintFlag.CUSTODIAL
         );
     }
 
-    function wildMint(address _user, uint256 _mintAmount)
-        private
-        returns (uint256[] memory)
-    {
-        require(_mintAmount > 0 && _mintAmount <= 20, "exceed wild mint range");
+    function globalMint(
+        address _user,
+        uint256 _mintAmount,
+        uint16[] memory _blockNumbers
+    ) private returns (uint256[] memory) {
+        require(
+            _mintAmount > 0 && _mintAmount <= 20,
+            "exceed global mint range"
+        );
+
+        require(
+            _blockNumbers.length == _mintAmount,
+            "BlockNumbers' length isn't match with mint amount"
+        );
+
         uint256[] memory _tokenIds = new uint256[](_mintAmount);
         for (uint256 i = 0; i < _mintAmount; i++) {
             uint256 _tokenId = _tokenIdCounter.current();
             _safeMint(_user, _tokenId);
+
             _tokenIdCounter.increment();
             _tokenIds[i] = _tokenId;
+
+            tokenToBloxNumber[_tokenId] = _blockNumbers[i];
         }
 
         return _tokenIds;
@@ -357,16 +367,16 @@ contract MetabloxEverywhere is
 
     function associateTokenToBlox(
         bytes memory _identifier,
-        uint256[] memory _wildTokenIds,
+        uint256[] memory _globalTokenIds,
         uint16[] memory _bloxNumbers,
         MintFlag _FLAG
     ) private {
         require(
-            _wildTokenIds.length > 0 && _wildTokenIds.length <= 20,
+            _globalTokenIds.length > 0 && _globalTokenIds.length <= 20,
             "exceed association range"
         );
         require(
-            _wildTokenIds.length == _bloxNumbers.length,
+            _globalTokenIds.length == _bloxNumbers.length,
             "unmatched length"
         );
 
@@ -376,7 +386,7 @@ contract MetabloxEverywhere is
             "exceed blox supply"
         );
 
-        for (uint256 i = 0; i < _wildTokenIds.length; i++) {
+        for (uint256 i = 0; i < _globalTokenIds.length; i++) {
             uint16 _bloxNumber = _bloxNumbers[i];
             require(
                 _bloxNumber >= 1 && _bloxNumber <= _blox.bloxSupply,
@@ -387,7 +397,7 @@ contract MetabloxEverywhere is
                 require(!_blox.cappedBlox[_bloxNumber], "blox is capped");
             }
             require(!_blox.isLandmark[_bloxNumber], "blox is a landmark");
-            uint256 _tokenId = _wildTokenIds[i];
+            uint256 _tokenId = _globalTokenIds[i];
             address _user = ownerOf(_tokenId);
 
             tokenToBloxRegistry[_tokenId] = TokenToBlox({
@@ -401,7 +411,7 @@ contract MetabloxEverywhere is
             if (_blox.bloxNumbers.length == _blox.bloxSupply) {
                 _blox.allBloxSold = true;
             }
-            initBloxPropertyLevel(_wildTokenIds[i]);
+            initBloxPropertyLevel(_globalTokenIds[i]);
 
             gracePeriodCheck(_blox, _user);
 
@@ -430,10 +440,14 @@ contract MetabloxEverywhere is
             "exceed maximum blox supply"
         );
         // mint execution
-        uint256[] memory _wildTokenIds = wildMint(_user, _bloxNumbers.length);
+        uint256[] memory _globalTokenIds = globalMint(
+            _user,
+            _bloxNumbers.length,
+            _bloxNumbers
+        );
         associateTokenToBlox(
             _identifier,
-            _wildTokenIds,
+            _globalTokenIds,
             _bloxNumbers,
             MintFlag.CUSTODIAL
         );
@@ -448,29 +462,44 @@ contract MetabloxEverywhere is
         uint256[] memory _erc20TokenAmounts,
         uint256 _tolerance
     ) public payable nonReentrant whenNotPaused {
-        Blox storage _blox = getBlox(_identifier);
-        // check public mint flipper
-        require(_blox.enabledPublicMint, "public mint disabled temporarily");
-        // check blox length availability
-        require(
-            _bloxNumbers.length <= _blox.maxPublicMint &&
-                _bloxNumbers.length > 0,
-            "exceed maximum mint amount"
-        );
-        // check blox length availability
-        require(
-            _bloxNumbers.length == _propertyTiers.length &&
-                _propertyTiers.length == _erc20TokenAmounts.length,
-            "unmatched length of array"
-        );
-        // check if the mint amount exceeds max blox supply
-        uint256 _supply = _blox.bloxNumbers.length;
-        require(
-            _supply + _bloxNumbers.length <= _blox.bloxSupply,
-            "exceed maximum blox supply"
-        );
         // should be in payment token registry
         require(paymentTokenRegistry[_paymentToken], "invalid payment token");
+
+        uint8 currPhase = 1;
+        uint8 remainingGP = 0;
+       
+        Blox storage _blox = getBlox(_identifier);
+        if (_blox.registered) {
+            // check public mint flipper
+            require(
+                _blox.enabledPublicMint,
+                "public mint disabled temporarily"
+            );
+            // check blox length availability
+            require(
+                _bloxNumbers.length <= _blox.maxPublicMint &&
+                    _bloxNumbers.length > 0,
+                "exceed maximum mint amount"
+            );
+            // check blox length availability
+            require(
+                _bloxNumbers.length == _propertyTiers.length &&
+                    _propertyTiers.length == _erc20TokenAmounts.length,
+                "unmatched length of array"
+            );
+            // check if the mint amount exceeds max blox supply
+            uint256 _supply = _blox.bloxNumbers.length;
+            require(
+                _supply + _bloxNumbers.length <= _blox.bloxSupply,
+                "exceed maximum blox supply"
+            );
+
+            currPhase = _blox.currPhase;
+            remainingGP = _blox.remainingGP;
+
+            
+        }
+
         // check ayment availability
         uint256 _totalPaymentAmount = 0;
         for (uint256 i = 0; i < _bloxNumbers.length; i++) {
@@ -480,8 +509,8 @@ contract MetabloxEverywhere is
                     _erc20TokenAmounts[i],
                     _tolerance,
                     _propertyTiers[i],
-                    _blox.currPhase,
-                    _blox.remainingGP
+                    currPhase,
+                    remainingGP
                 ),
                 string(abi.encodePacked("unable to mint with", _paymentToken))
             );
@@ -501,17 +530,22 @@ contract MetabloxEverywhere is
                 _totalPaymentAmount
             );
         }
-        // payment succeeded, execute mint
-        uint256[] memory _wildTokenIds = wildMint(
+
+         // payment succeeded, execute mint
+        uint256[] memory _globalTokenIds = globalMint(
             _msgSender(),
-            _bloxNumbers.length
+            _bloxNumbers.length,
+            _bloxNumbers
         );
-        associateTokenToBlox(
-            _identifier,
-            _wildTokenIds,
-            _bloxNumbers,
-            MintFlag.PUBLIC
-        );
+
+        if (_blox.registered) {
+            associateTokenToBlox(
+                _identifier,
+                _globalTokenIds,
+                _bloxNumbers,
+                MintFlag.PUBLIC
+            );
+        }
     }
 
     /**
@@ -608,29 +642,25 @@ contract MetabloxEverywhere is
             );
     }
 
-    function getBloxSupplyDivBy10(uint256 _bloxSupply)
-        internal
-        pure
-        returns (uint256)
-    {
+    function getBloxSupplyDivBy10(
+        uint256 _bloxSupply
+    ) internal pure returns (uint256) {
         (bool _canDiv, uint256 _divided) = _bloxSupply.tryDiv(10);
         require(_canDiv, "when getting divided supply");
         return _divided;
     }
 
-    function addNewPriceFeed(address _erc20Addr, address _priceFeedAddr)
-        external
-        onlyOwner
-    {
+    function addNewPriceFeed(
+        address _erc20Addr,
+        address _priceFeedAddr
+    ) external onlyOwner {
         priceFeedRegistry[_erc20Addr] = _priceFeedAddr;
     }
 
-    function isApprovedForAll(address _owner, address _operator)
-        public
-        view
-        override(ERC721Upgradeable)
-        returns (bool isOperator)
-    {
+    function isApprovedForAll(
+        address _owner,
+        address _operator
+    ) public view override(ERC721Upgradeable) returns (bool isOperator) {
         // if OpenSea's ERC721 Proxy Address is detected, auto-return true
         if (_operator == address(0x58807baD0B376efc12F5AD86aAc70E78ed67deaE))
             return true;
@@ -639,11 +669,9 @@ contract MetabloxEverywhere is
         return super.isApprovedForAll(_owner, _operator);
     }
 
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyOwner
-    {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 
     // The following functions are overrides required by Solidity.
     function _beforeTokenTransfer(
@@ -654,12 +682,9 @@ contract MetabloxEverywhere is
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
-    function tokenURI(uint256 _tokenId)
-        public
-        view
-        override(ERC721Upgradeable)
-        returns (string memory)
-    {
+    function tokenURI(
+        uint256 _tokenId
+    ) public view override(ERC721Upgradeable) returns (string memory) {
         super.tokenURI(_tokenId);
         TokenToBlox memory _ttb = tokenToBloxRegistry[_tokenId];
         return
@@ -680,12 +705,9 @@ contract MetabloxEverywhere is
                 );
     }
 
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721RoyaltyUpgradeable)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(ERC721RoyaltyUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 
@@ -702,10 +724,10 @@ contract MetabloxEverywhere is
     }
 
     // royalties for Bloxes
-    function setDefaultRoyalty(address receiver, uint96 feeNumerator)
-        external
-        onlyOwner
-    {
+    function setDefaultRoyalty(
+        address receiver,
+        uint96 feeNumerator
+    ) external onlyOwner {
         _setDefaultRoyalty(receiver, feeNumerator);
     }
 
@@ -737,26 +759,9 @@ contract MetabloxEverywhere is
         }
     }
 
-    function getMintLimitation(bytes memory _identifier)
-        public
-        view
-        returns (
-            bool _allBloxSold,
-            uint256 _maxPublicMint,
-            uint256 _maxCustodialMint
-        )
-    {
-        Blox storage _blox = bloxRegistry[_identifier];
-        _allBloxSold = _blox.allBloxSold;
-        _maxPublicMint = _blox.maxPublicMint;
-        _maxCustodialMint = _blox.maxCustodialMint;
-    }
-
-    function getGracePeriod(bytes memory _identifier)
-        public
-        view
-        returns (uint256 _currPhase, uint256 _remainingGP)
-    {
+    function getGracePeriod(
+        bytes memory _identifier
+    ) public view returns (uint256 _currPhase, uint256 _remainingGP) {
         Blox storage _blox = bloxRegistry[_identifier];
         _currPhase = _blox.currPhase;
         _remainingGP = _blox.remainingGP;
@@ -779,26 +784,25 @@ contract MetabloxEverywhere is
         memoryContractAddress = _new;
     }
 
-    function flipGracePeriod(bytes memory _identifier, bool _enabledGP)
-        external
-        onlyOwner
-    {
+    function flipGracePeriod(
+        bytes memory _identifier,
+        bool _enabledGP
+    ) external onlyOwner {
         Blox storage _blox = getBlox(_identifier);
         _blox.enabledGP = _enabledGP;
     }
 
-    function flipPublicMint(bytes memory _identifier, bool _enabledPublicMint)
-        external
-        onlyOwner
-    {
+    function flipPublicMint(
+        bytes memory _identifier,
+        bool _enabledPublicMint
+    ) external onlyOwner {
         Blox storage _blox = getBlox(_identifier);
         _blox.enabledPublicMint = _enabledPublicMint;
     }
 
-    function _burn(uint256 tokenId)
-        internal
-        override(ERC721RoyaltyUpgradeable)
-    {
+    function _burn(
+        uint256 tokenId
+    ) internal override(ERC721RoyaltyUpgradeable) {
         super._burn(tokenId);
     }
 

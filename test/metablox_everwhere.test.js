@@ -11,7 +11,6 @@ const truffleAssert = require('truffle-assertions');
 
 const BN = require('bn.js');
 
-const { deployProxy } = require('@openzeppelin/truffle-upgrades');
 const { assert } = require('chai');
 
 /*
@@ -95,7 +94,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 		)
 
 		this.identifier = await this.Metablox.getIdentifier(this.country, this.state, this.city);
-
 		this.TEST_BLOX_SUPPLY = 30 // 20 + 10 Landmark
 		await this.Metablox.setBloxSupply(
 			this.identifier,
@@ -139,12 +137,6 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 				assert.equal(await this.Metablox.paymentTokenBeneficiary(), this.paymentTokenBeneficiary, "unmatched payment token beneficiary");
 			});
 
-			it("should have correct limitations", async function () {
-				const mintLimitation = await this.Metablox.getMintLimitation(this.identifier);
-				assert.equal(mintLimitation._allBloxSold, false, "unmatched allBloxSold");
-				assert.equal(mintLimitation._maxCustodialMint, 20, "unmatched maximum reserve mint amount");
-				assert.equal(mintLimitation._maxPublicMint, 5, "unmatched maximum public mint amount");
-			});
 
 			it("should have correct uris", async function () {
 				assert.equal(await this.Metablox.baseURI(), this.baseURI, "unmatched base uri");
@@ -441,6 +433,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 							this.identifier,
 							this.dummyReceiver,
 							Array(20).fill(10), // Blox number
+							Array(20).fill(2), // Blox number
 							{ from: this.minter },
 						),
 						"exceed maximum blox supply",
@@ -482,6 +475,21 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 					gasPrice = _tx.gasPrice;
 				})
 
+				it.skip("public mint #2", async function () {
+					tx = await this.Metablox.publicBatchMint(
+						"0x5553574153656174746c66",
+						[2], // Blox number
+						[this.propertyTier], // property tier: 1
+						this.WMATIC.address, // buy with: MATIC
+						[MATIC_100], // MATIC token amount: 42.958 MATIC
+						"100", // tolerance: 1%
+						{ from: this.owner, value: MATIC_100 },
+					)
+					gasUsed = tx.receipt.gasUsed;
+					const _tx = await web3.eth.getTransaction(tx.tx);
+					gasPrice = _tx.gasPrice;
+				})
+
 				context("token transfer", async function () {
 					before(async function () {
 						await truffleAssert.passes(
@@ -489,7 +497,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 							"should successfully transfer token to owner",
 						);
 					})
-					it("should successfully transfer a wild token", async function () {
+					it("should successfully transfer a global token", async function () {
 						assert.equal(await this.Metablox.ownerOf(1), this.dummyReceiver, "unmatched NFT owner");
 						assert.equal((await this.Metablox.getBloxByTokenId(1))[0], this.dummyReceiver, "unmatched Blox owner");
 					});
@@ -616,15 +624,16 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 			})
 		})
 
-		context("with authorized wild mint", async function () {
+		context("with authorized global mint", async function () {
 			context("happy path", async function () {
-				it("wild mint", async function () {
-					await this.Metablox.authorizedWildMint(
+				it("global mint", async function () {
+					await this.Metablox.authorizedGlobalMint(
 						this.dummyReceiver,
-						1,
+						[1], // block number
 						{ from: this.minter },
 					)
-					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 2, "unmatched Blox supply after wild mint");
+					assert.equal(await this.Metablox.getBloxTotalSupply(this.identifier), 2, "unmatched Blox supply after global mint");
+					assert.equal(await this.Metablox.tokenToBloxNumber(2), 1, "unmatched token tier after global mint");
 				})
 
 				context("token transfer", async function () {
@@ -634,7 +643,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 							"should successfully transfer token to owner",
 						);
 					})
-					it("should successfully transfer a wild token", async function () {
+					it("should successfully transfer a global token", async function () {
 						assert.equal(await this.Metablox.ownerOf(2), this.owner, "unmatched NFT owner");
 						assert.equal((await this.Metablox.getBloxByTokenId(2))[0], "0x0000000000000000000000000000000000000000", "should be zero address after a token was minted");
 					});
@@ -650,7 +659,7 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 				})
 
 				it("should have correct token uri", async function () {
-					assert.equal(await this.Metablox.tokenURI(2), `${this.baseURI}wild/2`, "unmatched NFT owner");
+					assert.equal(await this.Metablox.tokenURI(2), `${this.baseURI}global/2`, "unmatched NFT owner");
 				});
 
 				context("token association", async function () {
@@ -799,17 +808,22 @@ contract.only("Metablox Everywhere Test", function (accounts) {
 	})
 
 	context("mint #3", async function () {
-		it("wild mint and association", async function () {
-			await this.Metablox.authorizedWildMint(
+		it("global mint and association", async function () {
+			await this.Metablox.authorizedGlobalMint(
 				this.dummyReceiver,
 				3,
+				[1, 2, 3], // block numbers
 				{ from: this.minter },
 			)
 			// token uri examination
-			assert.equal(await this.Metablox.tokenURI(6), `${this.baseURI}wild/6`, "unmatched NFT owner");
-			assert.equal(await this.Metablox.tokenURI(7), `${this.baseURI}wild/7`, "unmatched NFT owner");
-			assert.equal(await this.Metablox.tokenURI(8), `${this.baseURI}wild/8`, "unmatched NFT owner");
-			// shouldn't enter grace period when doing a wild mint
+			assert.equal(await this.Metablox.tokenURI(6), `${this.baseURI}global/6`, "unmatched NFT owner");
+			assert.equal(await this.Metablox.tokenURI(7), `${this.baseURI}global/7`, "unmatched NFT owner");
+			assert.equal(await this.Metablox.tokenURI(8), `${this.baseURI}global/8`, "unmatched NFT owner");
+			// block number examination
+			assert.equal(await this.Metablox.tokenToBloxNumber(6), 1, "unmatched block number of token 6");
+			assert.equal(await this.Metablox.tokenToBloxNumber(7), 2, "unmatched block number of token 7");
+			assert.equal(await this.Metablox.tokenToBloxNumber(8), 3, "unmatched block number of token 8");
+			// shouldn't enter grace period when doing a global mint
 			const gp = await this.Metablox.getGracePeriod(this.identifier);
 			assert.equal(gp._currPhase, 3, "unmatched current phase");
 			assert.equal(gp._remainingGP, 1, "unmatched remaining grace period amount");
